@@ -1,0 +1,16 @@
+[package]
+name = "riam"
+version = "0.1.0"
+authors = ["Aaron J Todd <aajtodd@gmail.com>"]
+edition = "2018"
+license = "MIT"
+description = "A IAM inspired policy engine for making decisions"
+repository = "https://github.com/aajtodd/riam"
+keywords = ["iam", "policy", "access control"]
+categories = ["authentication"]
+readme = "README.md"
+include = ["Cargo.toml", "src/**/*.rs", "README.md", "LICENSE"]
+
+[dependencies]
+failure = "0.1.6"
+serde_json = "1.0"
