@@ -2,13 +2,7 @@
 //! A decision/policy engine inspired by AWS IAM policies
 
 mod error;
+mod policy;
 
 pub use error::{Result, RiamError};
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub use policy::Policy;
