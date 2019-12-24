@@ -11,6 +11,16 @@ pub enum RiamError {
     /// Serialization or deserialization error
     #[fail(display = "serde_json error: {}", _0)]
     Serde(#[cause] serde_json::Error),
+
+    /// Invalid policy
+    /// The policy is not well formed.
+    #[fail(display = "Invalid policy")]
+    InvalidPolicy,
+
+    /// NonExistant policy
+    /// The policy does not exist
+    #[fail(display = "Invalid policy")]
+    UnknownPolicy,
 }
 
 impl From<io::Error> for RiamError {

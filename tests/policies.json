@@ -1,0 +1,15 @@
+[
+
+    {
+        "sid": "Account policy",
+        "principals": ["users:test-user", "groups:power-users"],
+        "statements": [
+            {
+                "effect": "allow",
+                "actions": ["account:list", "account:get"],
+                "resources": ["resource:account:1235"]
+            }
+        ]
+    }
+
+]
