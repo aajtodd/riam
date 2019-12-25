@@ -61,7 +61,9 @@ impl<T: PolicyManager> Engine<T> {
 
         let mut allowed = false;
 
-        // iterate over all the policies
+        // we have to iterate over all the policies since policy statements may be contradictory
+        // (e.g. one allows, another explicitly denies). Explicit denies take precedence over 
+        // the 
         for p in policies.iter() {
             // check the policy statements
             for stmt in p.statements.iter() {
@@ -104,6 +106,7 @@ impl<T: PolicyManager> Engine<T> {
 mod tests {
     use super::*;
     use crate::managers::MemoryManager;
+    use test::Bencher;
 
     #[test]
     fn test_engine_is_allowed() {
@@ -162,4 +165,50 @@ mod tests {
             assert_eq!(expected, actual, "req: {:?}", req);
         }
     }
+
+    #[bench]
+    fn bench_is_allowed(b: &mut Bencher) {
+        let mut engine = Engine::new(MemoryManager::new());
+        let jsp = r#"
+        {
+            "name": "Account policy",
+            "statements": [
+                {
+                    "sid": "Grant account list access",
+                    "effect": "allow",
+                    "actions": ["account:list"],
+                    "resources": ["resource:account:*"]
+                },
+                {
+                    "sid": "Deny root account access",
+                    "effect": "deny",
+                    "actions": ["account:list"],
+                    "resources": ["resource:account:123"]
+                },
+                {
+                    "sid": "Grant all read access on specific account",
+                    "effect": "allow",
+                    "actions": ["account:describe:*"],
+                    "resources": ["resource:account:789"]
+                }
+            ]
+        }
+        "#;
+
+        let policy: Policy = serde_json::from_str(jsp).unwrap();
+        let id = engine.manager.create(policy).unwrap();
+        let principal = "user:test-user";
+        engine.manager.attach(principal, &id).unwrap();
+
+        let (principal, action, resource) = ( "user:test-user", "account:describe:limits", "resource:account:789",); // Statement 3
+        let req = AuthRequest {
+            principal: principal.to_string(),
+            action: action.to_string(),
+            resource: resource.to_string(),
+        };
+
+            
+        b.iter(|| engine.is_allowed(&req));
+    }
+
 }
