@@ -115,7 +115,7 @@ impl PolicyManager for MemoryManager {
 mod tests {
     use super::*;
     #[test]
-    fn memory_manager_attach_detach() {
+    fn test_memory_manager_attach_detach() {
         let mut mgr = MemoryManager::new();
 
         let jsp = r#"
@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_manager_update() {
+    fn test_memory_manager_update() {
         let mut mgr = MemoryManager::new();
 
         let jsp = r#"
@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_manager_delete() {
+    fn test_memory_manager_delete() {
         let mut mgr = MemoryManager::new();
 
         let jsp = r#"

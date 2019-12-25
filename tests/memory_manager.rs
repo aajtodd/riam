@@ -53,7 +53,7 @@ fn get_policies_by_principal() {
         };
 
         let id = mgr.create(p).unwrap();
-        mgr.attach(&principal, &id);
+        mgr.attach(&principal, &id).unwrap();
     }
 
     let actual = mgr

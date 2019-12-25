@@ -65,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn statement_serialization_no_sid() {
+    fn test_statement_serialization_no_sid() {
         // sid should be left off serialized json when not set
         let statement = Statement {
             sid: None,
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_serialization() {
+    fn test_policy_serialization() {
         let policy = Policy {
             name: Some("my policy".into()),
             id: None,
@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_is_valid() {
+    fn test_policy_is_valid() {
         let mut policy = Policy {
             name: None,
             id: None,
