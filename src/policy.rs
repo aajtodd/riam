@@ -4,8 +4,11 @@ use uuid::Uuid;
 /// Effect indicates whether a policy statement allows or denies access
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub enum Effect {
+    /// Allow access
     #[serde(rename = "allow")]
     Allow,
+
+    /// Deny access
     #[serde(rename = "deny")]
     Deny,
 }

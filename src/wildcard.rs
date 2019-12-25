@@ -8,7 +8,7 @@
 ///
 /// If no wildcard is present in the pattern the inputs must be an exact match.
 ///
-fn matches(pattern: &str, s: &str) -> bool {
+pub(crate) fn matches(pattern: &str, s: &str) -> bool {
     let mut piter = pattern.chars();
     let mut siter = s.chars();
 
@@ -75,7 +75,7 @@ mod tests {
             ("actions:*:123", "actions:accounts:list:123", false),
             ("actions:*:list:*", "actions:accounts:list:123", true),
             ("actions:*:*:123", "actions:accounts:list:123", true),
-            ("actions:**:123", "actions:accounts:list:123", true),
+            ("actions:**123", "actions:accounts:list:123", true),
         ];
 
         for x in cases {

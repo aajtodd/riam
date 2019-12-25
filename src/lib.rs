@@ -8,8 +8,10 @@ mod engine;
 mod error;
 pub mod managers;
 mod policy;
+mod request;
 mod wildcard;
 
 pub use engine::{Engine, PolicyManager};
 pub use error::{Result, RiamError};
-pub use policy::Policy;
+pub use policy::{Effect, Policy, Statement};
+pub use request::AuthRequest;

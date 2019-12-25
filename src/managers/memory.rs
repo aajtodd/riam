@@ -51,7 +51,7 @@ impl PolicyManager for MemoryManager {
     }
 
     /// Get a policy by id
-    fn get(&mut self, id: &Uuid) -> Result<&Policy> {
+    fn get(&self, id: &Uuid) -> Result<&Policy> {
         if let Some(p) = self.by_id.get(&id) {
             return Ok(p);
         }
@@ -73,12 +73,12 @@ impl PolicyManager for MemoryManager {
     }
 
     /// List all policies
-    fn list(&mut self) -> Result<Vec<Policy>> {
+    fn list(&self) -> Result<Vec<Policy>> {
         Ok(Vec::new())
     }
 
     /// Get all policies for a given principal
-    fn get_policies_for_principal(&mut self, principal: &str) -> Result<Option<Vec<Policy>>> {
+    fn get_policies_for_principal(&self, principal: &str) -> Result<Option<Vec<Policy>>> {
         if let Some(policy_ids) = self.by_principal.get(principal) {
             let mut policies: Vec<Policy> = Vec::with_capacity(policy_ids.len());
             for id in policy_ids {

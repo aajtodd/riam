@@ -1,5 +1,5 @@
-use crate::Policy;
-use crate::Result;
+use crate::wildcard;
+use crate::{Effect, Policy, AuthRequest, Result};
 use uuid::Uuid;
 
 /// Manage creation, storage/retrieval, and deletion of policies.
@@ -16,10 +16,10 @@ pub trait PolicyManager {
     fn delete(&mut self, id: &Uuid) -> Result<()>;
 
     /// Get a policy by id
-    fn get(&mut self, id: &Uuid) -> Result<&Policy>;
+    fn get(&self, id: &Uuid) -> Result<&Policy>;
 
     /// List all policies
-    fn list(&mut self) -> Result<Vec<Policy>>;
+    fn list(&self) -> Result<Vec<Policy>>;
 
     /// Attach a policy to a principal
     fn attach(&mut self, principal: &str, id: &Uuid) -> Result<()>;
@@ -28,8 +28,9 @@ pub trait PolicyManager {
     fn detach(&mut self, principal: &str, id: &Uuid) -> Result<()>;
 
     /// Get all policies for a given principal
-    fn get_policies_for_principal(&mut self, principal: &str) -> Result<Option<Vec<Policy>>>;
+    fn get_policies_for_principal(&self, principal: &str) -> Result<Option<Vec<Policy>>>;
 }
+
 
 /// Engine implements the logic to check if a specific request (action)
 /// by a principal is allowed or not on a particular resource.
@@ -38,7 +39,8 @@ pub trait PolicyManager {
 /// If no statement matches then a request is implicitly denied by default.
 ///
 pub struct Engine<T: PolicyManager> {
-    manager: T,
+    /// The underlying policy manager/storage mechanism
+    pub manager: T,
 }
 
 impl<T: PolicyManager> Engine<T> {
@@ -48,7 +50,116 @@ impl<T: PolicyManager> Engine<T> {
     }
 
     /// Check if an action is allowed or not
-    pub fn is_allowed(&mut self /* request */) -> Result<bool> {
-        unimplemented!();
+    pub fn is_allowed(&mut self, req: &AuthRequest) -> Result<bool> {
+        let policies = self.manager.get_policies_for_principal(&req.principal)?;
+
+        if policies.is_none() {
+            // no policies for the given principal
+            return Ok(false);
+        }
+        let policies = policies.unwrap();
+
+        let mut allowed = false;
+
+        // iterate over all the policies
+        for p in policies.iter() {
+            // check the policy statements
+            for stmt in p.statements.iter() {
+                // check if any of the actions match
+                if !stmt
+                    .actions
+                    .iter()
+                    .any(|action| wildcard::matches(action, &req.action))
+                {
+                    continue;
+                }
+
+                // check if any of the resources match
+                if !stmt
+                    .resources
+                    .iter()
+                    .any(|resource| wildcard::matches(resource, &req.resource))
+                {
+                    continue;
+                }
+
+                // the current statement is a candidate, check the intended effect
+                match stmt.effect {
+                    Effect::Allow => {
+                        allowed = true;
+                    }
+                    Effect::Deny => {
+                        // explicit deny 
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+
+        Ok(allowed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::managers::MemoryManager;
+
+    #[test]
+    fn test_engine_is_allowed() {
+        let mut engine = Engine::new(MemoryManager::new());
+
+        let jsp = r#"
+        {
+            "name": "Account policy",
+            "statements": [
+                {
+                    "sid": "Grant account list access",
+                    "effect": "allow",
+                    "actions": ["account:list"],
+                    "resources": ["resource:account:*"]
+                },
+                {
+                    "sid": "Deny root account access",
+                    "effect": "deny",
+                    "actions": ["account:list"],
+                    "resources": ["resource:account:123"]
+                },
+                {
+                    "sid": "Grant all read access on specific account",
+                    "effect": "allow",
+                    "actions": ["account:describe:*"],
+                    "resources": ["resource:account:789"]
+                }
+            ]
+        }
+        "#;
+
+        let policy: Policy = serde_json::from_str(jsp).unwrap();
+        let id = engine.manager.create(policy).unwrap();
+        let principal = "user:test-user";
+        engine.manager.attach(principal, &id).unwrap();
+
+        #[rustfmt::skip] 
+        let cases = vec![
+            // principal, action, resource, expected
+            ( "user:test-user", "account:list", "resource:account:567", true,), // statement 1
+            ( "user:test-user", "account:list", "resource:account:789", true,), // statement 1
+            ( "user:test-user-2", "account:list", "resource:account:789", false,), // non-existent principal
+            ( "user:test-user", "account:list", "resource:account:123", false,), // statement 2 (explicit deny w/allowed match on other statements)
+            ( "user:test-user", "account:describe:limits", "resource:account:123", false,), // no matching statements
+            ( "user:test-user", "account:describe:limits", "resource:account:789", true,), // statement 3
+        ];
+        for x in cases {
+            let (principal, action, resource, expected) = x;
+            let req = AuthRequest {
+                principal: principal.to_string(),
+                action: action.to_string(),
+                resource: resource.to_string(),
+            };
+
+            let actual = engine.is_allowed(&req).unwrap();
+            assert_eq!(expected, actual, "req: {:?}", req);
+        }
     }
 }
