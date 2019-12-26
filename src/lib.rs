@@ -1,6 +1,11 @@
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 #![deny(missing_docs)]
-//! A decision/policy engine inspired by AWS IAM policies
+//! # riam
+//! riam is a decision/policy engine inspired by AWS IAM policies.
+//!
+//! See the [REPO] README for additional information.
+//!
+//! [REPO]: https://github.com/aajtodd/riam
 
 #[cfg(all(test, feature = "nightly"))]
 extern crate test;
