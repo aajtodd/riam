@@ -1,5 +1,5 @@
 use crate::wildcard;
-use crate::{Effect, Policy, AuthRequest, Result};
+use crate::{AuthRequest, Effect, Policy, Result};
 use uuid::Uuid;
 
 /// Manage creation, storage/retrieval, and deletion of policies.
@@ -31,7 +31,6 @@ pub trait PolicyManager {
     fn get_policies_for_principal(&self, principal: &str) -> Result<Option<Vec<Policy>>>;
 }
 
-
 /// Engine implements the logic to check if a specific request (action)
 /// by a principal is allowed or not on a particular resource.
 ///
@@ -62,8 +61,8 @@ impl<T: PolicyManager> Engine<T> {
         let mut allowed = false;
 
         // we have to iterate over all the policies since policy statements may be contradictory
-        // (e.g. one allows, another explicitly denies). Explicit denies take precedence over 
-        // the 
+        // (e.g. one allows, another explicitly denies). Explicit denies take precedence over
+        // the
         for p in policies.iter() {
             // check the policy statements
             for stmt in p.statements.iter() {
@@ -91,7 +90,7 @@ impl<T: PolicyManager> Engine<T> {
                         allowed = true;
                     }
                     Effect::Deny => {
-                        // explicit deny 
+                        // explicit deny
                         return Ok(false);
                     }
                 }
@@ -145,7 +144,7 @@ mod tests {
         let principal = "user:test-user";
         engine.manager.attach(principal, &id).unwrap();
 
-        #[rustfmt::skip] 
+        #[rustfmt::skip]
         let cases = vec![
             // principal, action, resource, expected
             ( "user:test-user", "account:list", "resource:account:567", true,), // statement 1
@@ -203,15 +202,17 @@ mod tests {
         let principal = "user:test-user";
         engine.manager.attach(principal, &id).unwrap();
 
-        let (principal, action, resource) = ( "user:test-user", "account:describe:limits", "resource:account:789",); // Statement 3
+        let (principal, action, resource) = (
+            "user:test-user",
+            "account:describe:limits",
+            "resource:account:789",
+        ); // Statement 3
         let req = AuthRequest {
             principal: principal.to_string(),
             action: action.to_string(),
             resource: resource.to_string(),
         };
 
-            
         b.iter(|| engine.is_allowed(&req));
     }
-
 }
