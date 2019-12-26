@@ -1,5 +1,8 @@
 stages:
  - template: azure/stages.yml@templates
+   parameters:
+     # for now disable all features check since our only feature is 'nightly' for toggling benchmarks. Revisit if we ever add "real" features
+     check_all_features: false
    
 resources:
   repositories:
