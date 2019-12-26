@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use std::fmt;
+use std::marker::PhantomData;
+
+use serde::de::{self, Deserializer};
+use serde::ser::{SerializeSeq, Serializer};
+
 /// Effect indicates whether a policy statement allows or denies access
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub enum Effect {
@@ -24,9 +30,17 @@ pub struct Statement {
     pub effect: Effect,
 
     /// One or more actions that apply to the resources
+    #[serde(
+        serialize_with = "se_scalar_or_seq_string",
+        deserialize_with = "de_scalar_or_seq_string"
+    )]
     pub actions: Vec<String>,
 
     /// The resources the statement applies to
+    #[serde(
+        serialize_with = "se_scalar_or_seq_string",
+        deserialize_with = "de_scalar_or_seq_string"
+    )]
     pub resources: Vec<String>,
 }
 
@@ -56,6 +70,65 @@ impl Policy {
                 .iter()
                 .any(|x| x.actions.is_empty() || x.resources.is_empty()));
     }
+}
+
+// custom deserialize for policy statements which deserializes scalar strings and sequence
+// of strings both to Vec<String>.
+// If the input is a scalar string it serializes it to vec of length 1, otherwise if it is
+// a normal sequence/array it will use the builtin sequence deserializer.
+// e.g.
+// "actions:list" -> vec!["actions:list"]
+// ["actions:list", "actions:get"] -> vec!["actions:list", "actions:get"]
+fn de_scalar_or_seq_string<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StringOrVec(PhantomData<Vec<String>>);
+
+    impl<'de> de::Visitor<'de> for StringOrVec {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("string or list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(vec![value.to_owned()])
+        }
+
+        fn visit_seq<S>(self, visitor: S) -> Result<Self::Value, S::Error>
+        where
+            S: de::SeqAccess<'de>,
+        {
+            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(visitor))
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec(PhantomData))
+}
+
+// custom serialize for Vec<String> for policy statements. If the vec length is
+// 1 the output will be flattened to just that single string. Otherwise it will
+// serialize normally to a sequence
+// e.g.
+// vec!["actions:list"] -> "actions:list"
+// vec!["actions:list", "actions:get"] -> ["actions:list", "actions:get"]
+fn se_scalar_or_seq_string<S>(x: &Vec<String>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if x.len() == 1 {
+        return s.serialize_str(&x[0]);
+    }
+
+    let mut seq = s.serialize_seq(Some(x.len()))?;
+    for e in x {
+        seq.serialize_element(e)?;
+    }
+    seq.end()
 }
 
 #[cfg(test)]
@@ -101,6 +174,37 @@ mod tests {
     }
 
     #[test]
+    fn test_statement_serialization_scalars() {
+        // test serialization/deserialization with scalar fields
+        let statement = Statement {
+            sid: None,
+            effect: Effect::Deny,
+            actions: vec_of_strings!["actions:list"],
+            resources: vec_of_strings!["resources:123"],
+        };
+
+        assert_tokens(
+            &statement,
+            &[
+                Token::Struct {
+                    name: "Statement",
+                    len: 3,
+                },
+                Token::Str("effect"),
+                Token::UnitVariant {
+                    name: "Effect",
+                    variant: "deny",
+                },
+                Token::Str("actions"),
+                Token::Str("actions:list"),
+                Token::Str("resources"),
+                Token::Str("resources:123"),
+                Token::StructEnd,
+            ],
+        );
+    }
+
+    #[test]
     fn test_policy_serialization() {
         let policy = Policy {
             name: Some("my policy".into()),
@@ -108,7 +212,7 @@ mod tests {
             statements: vec![Statement {
                 sid: Some("my statement".into()),
                 effect: Effect::Allow,
-                actions: vec_of_strings!["blog:list"],
+                actions: vec_of_strings!["blog:list", "blog:get"],
                 resources: vec_of_strings!["resources:blog:123", "resources:blog:*"],
             }],
         };
@@ -138,8 +242,9 @@ mod tests {
                     variant: "allow",
                 },
                 Token::Str("actions"),
-                Token::Seq { len: Some(1) },
+                Token::Seq { len: Some(2) },
                 Token::Str("blog:list"),
+                Token::Str("blog:get"),
                 Token::SeqEnd,
                 Token::Str("resources"),
                 Token::Seq { len: Some(2) },

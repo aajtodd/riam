@@ -132,8 +132,8 @@ mod tests {
                 {
                     "sid": "Grant all read access on specific account",
                     "effect": "allow",
-                    "actions": ["account:describe:*"],
-                    "resources": ["resource:account:789"]
+                    "actions": "account:describe:*",
+                    "resources": "resource:account:789"
                 }
             ]
         }
