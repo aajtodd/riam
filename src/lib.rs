@@ -1,7 +1,8 @@
+#![cfg_attr(all(test, feature = "nightly"), feature(test))]
 #![deny(missing_docs)]
 //! A decision/policy engine inspired by AWS IAM policies
 
-#![feature(test)]
+#[cfg(all(test, feature = "nightly"))]
 extern crate test;
 
 mod engine;

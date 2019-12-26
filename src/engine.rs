@@ -106,6 +106,8 @@ impl<T: PolicyManager> Engine<T> {
 mod tests {
     use super::*;
     use crate::managers::MemoryManager;
+
+    #[cfg(feature = "nightly")]
     use test::Bencher;
 
     #[test]
@@ -166,6 +168,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_is_allowed(b: &mut Bencher) {
         let mut engine = Engine::new(MemoryManager::new());

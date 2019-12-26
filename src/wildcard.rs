@@ -61,6 +61,8 @@ pub(crate) fn matches(pattern: &str, s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "nightly")]
     use test::Bencher;
 
     #[test]
@@ -85,6 +87,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_match_wildcard(b: &mut Bencher) {
         let pattern = "actions:*:list:123";
@@ -92,6 +95,7 @@ mod tests {
         b.iter(|| matches(pattern, input));
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_match_exact(b: &mut Bencher) {
         let pattern = "actions:accounts:list:123";
