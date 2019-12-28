@@ -10,6 +10,7 @@
 #[cfg(all(test, feature = "nightly"))]
 extern crate test;
 
+pub mod condition;
 mod engine;
 mod error;
 pub mod managers;
