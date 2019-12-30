@@ -1,5 +1,6 @@
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 #![deny(missing_docs)]
+#![deny(intra_doc_link_resolution_failure)]
 //! # riam
 //! riam is a decision/policy engine inspired by AWS IAM policies.
 //!
@@ -10,7 +11,7 @@
 #[cfg(all(test, feature = "nightly"))]
 extern crate test;
 
-pub mod condition;
+pub mod conditions;
 mod engine;
 mod error;
 pub mod managers;
@@ -21,4 +22,4 @@ mod wildcard;
 pub use engine::{Engine, PolicyManager};
 pub use error::{Result, RiamError};
 pub use policy::{Effect, Policy, Statement};
-pub use request::AuthRequest;
+pub use request::{AuthRequest, Context};
