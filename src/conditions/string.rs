@@ -1,5 +1,6 @@
 use super::condition::{self, Body, ScalarOrSeq};
 use super::Eval;
+use crate::wildcard;
 use crate::Context;
 use serde::{Deserialize, Serialize};
 
@@ -156,13 +157,57 @@ impl Eval for StringNotEqualsIgnoreCase {
     }
 }
 
-/// Case-sensitive matching. The values can include a multi-character match wildcard (*) or a single-character match wildcard (?) anywhere in the string.
+/// Case-sensitive matching. The values can include a multi-character match wildcard (*) anywhere in the string.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct StringLike(condition::Body<String>);
 
-/// Negated case-sensitive matching. The values can include a multi-character match wildcard (*) or a single-character match wildcard (?) anywhere in the string.
+impl_str_cond!(StringLike);
+
+impl Eval for StringLike {
+    fn evaluate(&self, ctx: &Context) -> bool {
+        for (key, values) in (self.0).0.iter() {
+            let valid = ctx
+                .0
+                .get(key)
+                .and_then(|x| match values {
+                    ScalarOrSeq::Scalar(sc) => Some(wildcard::matches(sc, x)),
+                    ScalarOrSeq::Seq(seq) => Some(seq.iter().any(|p| wildcard::matches(p, x))),
+                })
+                .unwrap_or(false);
+
+            if !valid {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Negated case-sensitive matching. The values can include a multi-character match wildcard (*) anywhere in the string.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct StringNotLike(condition::Body<String>);
+
+impl_str_cond!(StringNotLike);
+
+impl Eval for StringNotLike {
+    fn evaluate(&self, ctx: &Context) -> bool {
+        for (key, values) in (self.0).0.iter() {
+            let valid = ctx
+                .0
+                .get(key)
+                .and_then(|x| match values {
+                    ScalarOrSeq::Scalar(sc) => Some(!wildcard::matches(sc, x)),
+                    ScalarOrSeq::Seq(seq) => Some(seq.iter().all(|p| !wildcard::matches(p, x))),
+                })
+                .unwrap_or(false);
+
+            if !valid {
+                return false;
+            }
+        }
+        true
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -290,6 +335,51 @@ mod tests {
         assert!(!cond.evaluate(&ctx));
 
         ctx.0.insert("k1".to_owned(), "VaLue3".to_owned());
+        assert!(cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_eval_string_like() {
+        // singular
+        let cond = StringLike::new("k1", "re*123");
+
+        let mut ctx = Context(HashMap::new());
+        ctx.0.insert("k1".into(), "resources:blog:123".into());
+
+        assert!(cond.evaluate(&ctx));
+
+        ctx.0
+            .insert("k1".to_owned(), "resources:blog:456".to_owned());
+        assert!(!cond.evaluate(&ctx));
+
+        // multiple allowed
+        let cond = StringLike::new("k1", "resources:*:123").add("k1", "resources:*:456");
+        assert!(cond.evaluate(&ctx));
+
+        ctx.0
+            .insert("k1".to_owned(), "resources:blog:789".to_owned());
+        assert!(!cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_eval_string_not_like() {
+        // singular
+        let cond = StringNotLike::new("k1", "re*123");
+
+        let mut ctx = Context(HashMap::new());
+        ctx.0.insert("k1".into(), "resources:blog:123".into());
+
+        assert!(!cond.evaluate(&ctx));
+
+        ctx.0.insert("k1".into(), "resources:blog:456".into());
+        assert!(cond.evaluate(&ctx));
+
+        // multiple not allowed
+        let cond = StringNotLike::new("k1", "resources:*:123").add("k1", "resources:*:456");
+        assert!(!cond.evaluate(&ctx));
+
+        ctx.0
+            .insert("k1".to_owned(), "resources:blog:789".to_owned());
         assert!(cond.evaluate(&ctx));
     }
 }
