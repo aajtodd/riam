@@ -3,7 +3,9 @@ use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::string::{StringEquals, StringNotEquals};
+use super::string::{
+    StringEquals, StringEqualsIgnoreCase, StringNotEquals, StringNotEqualsIgnoreCase,
+};
 
 // Scalar (singular) or sequence (multiple) of values.
 //
@@ -77,6 +79,8 @@ pub trait Eval {
 pub enum Condition {
     StringEquals,
     StringNotEquals,
+    StringEqualsIgnoreCase,
+    StringNotEqualsIgnoreCase,
 }
 
 #[cfg(test)]
