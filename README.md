@@ -29,7 +29,7 @@ In the future a higher level service will be built on top of this library to pro
 
 # Concepts
 
-Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL[(https://en.wikipedia.org/wiki/Access-control_list)). 
+Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL](https://en.wikipedia.org/wiki/Access-control_list)). 
 
 Notable differences from AWS IAM policies:
     - riam policies only offer "identity" based policies in AWS terms. In riam's case an identity is abstract though and can represent whatever you want (user, group, machine/service, etc)
