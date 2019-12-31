@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::string::{
-    StringEquals, StringEqualsIgnoreCase, StringNotEquals, StringNotEqualsIgnoreCase,
+    StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase,
+    StringNotLike,
 };
 
 // Scalar (singular) or sequence (multiple) of values.
@@ -81,6 +82,8 @@ pub enum Condition {
     StringNotEquals,
     StringEqualsIgnoreCase,
     StringNotEqualsIgnoreCase,
+    StringLike,
+    StringNotLike,
 }
 
 #[cfg(test)]
