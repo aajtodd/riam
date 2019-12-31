@@ -45,7 +45,7 @@ pub struct Engine<T: PolicyManager> {
 impl<T: PolicyManager> Engine<T> {
     /// Create a new engine with the given policy manager
     pub fn new(manager: T) -> Self {
-        Engine { manager: manager }
+        Engine { manager }
     }
 
     /// Check if an action is allowed or not

@@ -64,11 +64,11 @@ impl Policy {
     /// Check if the policy is (structurally) valid
     pub fn is_valid(&self) -> bool {
         // TODO - validate resource names and action names follow whatever grammar we define for them
-        return !(self.statements.is_empty()
+        !(self.statements.is_empty()
             || self
                 .statements
                 .iter()
-                .any(|x| x.actions.is_empty() || x.resources.is_empty()));
+                .any(|x| x.actions.is_empty() || x.resources.is_empty()))
     }
 }
 
@@ -116,7 +116,7 @@ where
 // e.g.
 // vec!["actions:list"] -> "actions:list"
 // vec!["actions:list", "actions:get"] -> ["actions:list", "actions:get"]
-fn se_scalar_or_seq_string<S>(x: &Vec<String>, s: S) -> Result<S::Ok, S::Error>
+fn se_scalar_or_seq_string<S>(x: &[String], s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {

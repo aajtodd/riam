@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 /// An in-memory implemntation of a policy manager
+#[derive(Default)]
 pub struct MemoryManager {
     // principal -> policy_id's
     by_principal: HashMap<String, HashSet<Uuid>>,
@@ -61,10 +62,10 @@ impl PolicyManager for MemoryManager {
 
     /// Delete a policy
     fn delete(&mut self, id: &Uuid) -> Result<()> {
-        if let Some(_) = self.by_id.remove(&id) {
+        if self.by_id.remove(&id).is_some() {
             self.by_principal.retain(|_principal, pset| {
                 pset.remove(&id);
-                return pset.len() > 0;
+                !pset.is_empty()
             })
         } else {
             return Err(RiamError::UnknownPolicy);
@@ -94,7 +95,7 @@ impl PolicyManager for MemoryManager {
     fn attach(&mut self, principal: &str, id: &Uuid) -> Result<()> {
         self.by_principal
             .entry(principal.to_owned())
-            .or_insert(HashSet::new())
+            .or_insert_with(HashSet::new)
             .insert(*id);
         Ok(())
     }
@@ -103,7 +104,7 @@ impl PolicyManager for MemoryManager {
     fn detach(&mut self, principal: &str, id: &Uuid) -> Result<()> {
         if let Some(pset) = self.by_principal.get_mut(principal) {
             pset.remove(id);
-            if pset.len() == 0 {
+            if pset.is_empty() {
                 self.by_principal.remove(principal);
             }
         }
