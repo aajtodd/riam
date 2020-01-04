@@ -12,7 +12,7 @@ use super::string::{
 //
 // Type `ScalarOrSeq` holds either a single value or a vector of values.
 // Used internally to serialize/deserialize either JSON type easily (via untagged).
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub(in crate::conditions) enum ScalarOrSeq<T> {
     Scalar(T),
@@ -35,7 +35,7 @@ pub(in crate::conditions) enum ScalarOrSeq<T> {
 //
 // This is a shared implementation detail of concrete conditions
 //
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub(in crate::conditions) struct Body<T>(pub(in crate::conditions) HashMap<String, ScalarOrSeq<T>>);
 
 impl<T> Body<T> {
@@ -76,7 +76,7 @@ pub trait Eval {
 /// A statement may contain more than one condition.
 #[allow(missing_docs)] // Doc comments are broke with enum_dispatch
 #[enum_dispatch]
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum Condition {
     StringEquals,
     StringNotEquals,

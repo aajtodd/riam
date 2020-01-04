@@ -1,3 +1,4 @@
+use crate::conditions::Eval;
 use crate::wildcard;
 use crate::{AuthRequest, Effect, Policy, Result};
 use uuid::Uuid;
@@ -49,7 +50,7 @@ impl<T: PolicyManager> Engine<T> {
     }
 
     /// Check if an action is allowed or not
-    pub fn is_allowed(&mut self, req: &AuthRequest) -> Result<bool> {
+    pub fn is_allowed(&self, req: &AuthRequest) -> Result<bool> {
         let policies = self.manager.get_policies_for_principal(&req.principal)?;
 
         if policies.is_none() {
@@ -61,8 +62,7 @@ impl<T: PolicyManager> Engine<T> {
         let mut allowed = false;
 
         // we have to iterate over all the policies since policy statements may be contradictory
-        // (e.g. one allows, another explicitly denies). Explicit denies take precedence over
-        // the
+        // (e.g. one allows, another explicitly denies). Explicit denies take precedence.
         for p in policies.iter() {
             // check the policy statements
             for stmt in p.statements.iter() {
@@ -82,6 +82,17 @@ impl<T: PolicyManager> Engine<T> {
                     .any(|resource| wildcard::matches(resource, &req.resource))
                 {
                     continue;
+                }
+
+                // check the conditions
+                match stmt.conditions {
+                    Some(ref conditions) => {
+                        // conditions are AND'd together and must all match
+                        if !conditions.iter().all(|c| c.evaluate(&req.context)) {
+                            continue;
+                        }
+                    }
+                    None => {}
                 }
 
                 // the current statement is a candidate, check the intended effect
@@ -111,6 +122,7 @@ mod tests {
 
     #[test]
     fn test_engine_is_allowed() {
+        // simple smoke test, no conditions
         let mut engine = Engine::new(MemoryManager::new());
 
         let jsp = r#"
@@ -156,11 +168,7 @@ mod tests {
         ];
         for x in cases {
             let (principal, action, resource, expected) = x;
-            let req = AuthRequest {
-                principal: principal.to_string(),
-                action: action.to_string(),
-                resource: resource.to_string(),
-            };
+            let req = AuthRequest::new(principal, action, resource);
 
             let actual = engine.is_allowed(&req).unwrap();
             assert_eq!(expected, actual, "req: {:?}", req);
@@ -206,12 +214,10 @@ mod tests {
             "user:test-user",
             "account:describe:limits",
             "resource:account:789",
-        ); // Statement 3
-        let req = AuthRequest {
-            principal: principal.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-        };
+        );
+
+        // Statement 3
+        let req = AuthRequest::new(principal, action, resource);
 
         b.iter(|| engine.is_allowed(&req));
     }

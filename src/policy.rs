@@ -1,11 +1,10 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use std::fmt;
-use std::marker::PhantomData;
-
+use crate::conditions::Condition;
 use serde::de::{self, Deserializer};
 use serde::ser::{SerializeSeq, Serializer};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::marker::PhantomData;
+use uuid::Uuid;
 
 /// Effect indicates whether a policy statement allows or denies access
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
@@ -42,6 +41,10 @@ pub struct Statement {
         deserialize_with = "de_scalar_or_seq_string"
     )]
     pub resources: Vec<String>,
+
+    /// Specify condition(s) under which the policy statement is in effect
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditions: Option<Vec<Condition>>,
 }
 
 /// Policy represents an access control policy which is used to either grant or deny a
@@ -64,6 +67,8 @@ impl Policy {
     /// Check if the policy is (structurally) valid
     pub fn is_valid(&self) -> bool {
         // TODO - validate resource names and action names follow whatever grammar we define for them
+        // TODO - rather than return a bool, perhaps just validate(&self) -> Result<()> with the
+        // error set as "RiamError::InvalidPolicy(reason)"
         !(self.statements.is_empty()
             || self
                 .statements
@@ -134,6 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conditions;
     use serde_test::{assert_tokens, Token};
 
     macro_rules! vec_of_strings {
@@ -148,6 +154,7 @@ mod tests {
             effect: Effect::Deny,
             actions: Vec::new(),
             resources: Vec::new(),
+            conditions: None,
         };
 
         assert_tokens(
@@ -181,6 +188,7 @@ mod tests {
             effect: Effect::Deny,
             actions: vec_of_strings!["actions:list"],
             resources: vec_of_strings!["resources:123"],
+            conditions: None,
         };
 
         assert_tokens(
@@ -214,6 +222,7 @@ mod tests {
                 effect: Effect::Allow,
                 actions: vec_of_strings!["blog:list", "blog:get"],
                 resources: vec_of_strings!["resources:blog:123", "resources:blog:*"],
+                conditions: None,
             }],
         };
 
@@ -273,6 +282,7 @@ mod tests {
             effect: Effect::Allow,
             actions: vec_of_strings!["blog:list"],
             resources: vec_of_strings!["resources:blog:123", "resources:blog:*"],
+            conditions: None,
         };
 
         // invalid statement
@@ -281,6 +291,7 @@ mod tests {
             effect: Effect::Deny,
             actions: vec_of_strings!["account:list"],
             resources: Vec::new(),
+            conditions: None,
         };
 
         policy.statements.push(st1);
@@ -291,5 +302,41 @@ mod tests {
             .resources
             .push("resource:account".into());
         assert_eq!(true, policy.is_valid());
+    }
+
+    #[test]
+    fn test_policy_serialization_with_condition() {
+        let condition: Condition = conditions::StringEquals::new("k1", "v1").into();
+
+        let policy = Policy {
+            name: Some("my policy".into()),
+            id: None,
+            statements: vec![Statement {
+                sid: Some("my statement".into()),
+                effect: Effect::Allow,
+                actions: vec_of_strings!["blog:list", "blog:get"],
+                resources: vec_of_strings!["resources:blog:123", "resources:blog:*"],
+                conditions: Some(vec![condition]),
+            }],
+        };
+
+        let serialized = r#"
+            {
+                "name":"my policy",
+                "statements":[
+                    {
+                        "sid":"my statement",
+                        "effect":"allow",
+                        "actions": ["blog:list","blog:get"],
+                        "resources":["resources:blog:123","resources:blog:*"],
+                        "conditions":[
+                            {"StringEquals":{"k1":"v1"}}
+                        ]
+                    }
+                ]
+            }"#;
+
+        let actual: Policy = serde_json::from_str(serialized).unwrap();
+        assert_eq!(policy, actual);
     }
 }

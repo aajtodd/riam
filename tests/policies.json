@@ -1,15 +1,151 @@
-[
-
-    {
-        "sid": "Account policy",
-        "principals": ["users:test-user", "groups:power-users"],
-        "statements": [
-            {
-                "effect": "allow",
-                "actions": ["account:list", "account:get"],
-                "resources": ["resource:account:1235"]
+{
+    "principals": {
+        "user1": ["account-manager-policy"],
+        "user2": ["s3-policy-1", "s3-policy-2"],
+        "user3": ["account-admin-policy"]
+    },
+    "tests": [
+        {
+            "name": "account-manager-plcy-stmt-1",
+            "allowed": true,
+            "request": {
+                "principal": "user1", 
+                "action": "account:list",
+                "resource": "resource:account:567"
             }
-        ]
-    }
-
-]
+        },
+        {
+            "name": "account-admin-plcy-stmt-1: condition should fail",
+            "allowed": false,
+            "request": {
+                "principal": "user3", 
+                "action": "account:list",
+                "resource": "resource:account:567"
+            }
+        },
+        {
+            "name": "account-admin-plcy-stmt-1: condition should match",
+            "allowed": true,
+            "request": {
+                "principal": "user3", 
+                "action": "account:list",
+                "resource": "resource:account:567",
+                "context": {
+                    "UserAgent": "BankInternal"
+                }
+            }
+        },
+        {
+            "name": "s3-plcy-1-stmt-1",
+            "allowed": true,
+            "request": {
+                "principal": "user2", 
+                "action": "s3:ListBucket",
+                "resource":  "arn:aws::s3:::testbucket" 
+            }
+        },
+        {
+            "name": "s3-plcy-1-stmt-1: invalid bucket",
+            "allowed": false,
+            "request": {
+                "principal": "user2", 
+                "action": "s3:ListBucket",
+                "resource":  "arn:aws::s3:::badbucket" 
+            }
+        },
+        {
+            "name": "s3-plcy-1-stmt-2",
+            "allowed": true,
+            "request": {
+                "principal": "user2", 
+                "action": "s3:GetObject",
+                "resource":  "arn:aws::s3:::testbucket/test-are-fun.txt" 
+            }
+        },
+        {
+            "name": "s3-plcy-1-stmt-2: non *Object action",
+            "allowed": false,
+            "request": {
+                "principal": "user2", 
+                "action": "s3:GetMetadata",
+                "resource":  "arn:aws::s3:::testbucket/test-are-fun.txt" 
+            }
+        },
+        {
+            "name": "s3-plcy-2-stmt-1: explicit deny in second policy statement when policies contradict (s3-policy-1 and s3-policy-2)",
+            "allowed": false,
+            "request": {
+                "principal": "user2", 
+                "action": "s3:GetObject",
+                "resource":  "arn:aws::s3:::testbucket/private/secret.txt" 
+            }
+        }
+    ],
+    "policies": [
+        {
+            "name": "account-manager-policy",
+            "statements": [
+                {
+                    "sid": "Grant account list access",
+                    "effect": "allow",
+                    "actions": ["account:list"],
+                    "resources": ["resource:account:*"]
+                },
+                {
+                    "sid": "Deny root account access",
+                    "effect": "deny",
+                    "actions": ["account:*"],
+                    "resources": ["resource:account:123"]
+                },
+                {
+                    "sid": "Grant all read access on specific account",
+                    "effect": "allow",
+                    "actions": "account:describe:*",
+                    "resources": "resource:account:789"
+                }
+            ]
+        },
+        {
+            "name": "account-admin-policy",
+            "statements": [
+                {
+                    "sid": "Grant all account access when coming from internal application",
+                    "effect": "allow",
+                    "actions": ["account:*"],
+                    "resources": ["resource:account:*"],
+                    "conditions": [
+                        {"StringEquals": {"UserAgent": "BankInternal"}}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "s3-policy-1",
+            "statements": [
+                {
+                    "sid": "List objects in bucket",
+                    "effect": "allow",
+                    "actions": ["s3:ListBucket"],
+                    "resources": [ "arn:aws::s3:::testbucket" ]
+                },
+                {
+                    "sid": "AllowAllObjectActions",
+                    "effect": "allow",
+                    "actions": "s3:*Object",
+                    "resources": [ "arn:aws::s3:::testbucket/*" ]
+                }
+            ]
+        },
+        {
+            "name": "s3-policy-2",
+            "statements": [
+                {
+                    "sid": "DenySpecificActionOnFolder",
+                    "effect": "deny",
+                    "actions": "s3:GetObject",
+                    "resources": [ "arn:aws::s3:::testbucket/private/*" ]
+                }
+            ]
+        }
+    ]
+}

@@ -46,7 +46,7 @@ macro_rules! impl_str_cond {
 }
 
 /// Exact matching, case sensitive
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct StringEquals(condition::Body<String>);
 
 impl_str_cond!(StringEquals);
@@ -74,7 +74,7 @@ impl Eval for StringEquals {
 }
 
 /// Negated Matching
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct StringNotEquals(condition::Body<String>);
 
 impl_str_cond!(StringNotEquals);
@@ -100,7 +100,7 @@ impl Eval for StringNotEquals {
 }
 
 /// Exact matching, ignoring (value) case.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct StringEqualsIgnoreCase(condition::Body<String>);
 
 impl_str_cond!(StringEqualsIgnoreCase);
@@ -129,7 +129,7 @@ impl Eval for StringEqualsIgnoreCase {
 }
 
 /// Negated matching, ignoring (value) case.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct StringNotEqualsIgnoreCase(condition::Body<String>);
 
 impl_str_cond!(StringNotEqualsIgnoreCase);
@@ -158,7 +158,7 @@ impl Eval for StringNotEqualsIgnoreCase {
 }
 
 /// Case-sensitive matching. The values can include a multi-character match wildcard (*) anywhere in the string.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct StringLike(condition::Body<String>);
 
 impl_str_cond!(StringLike);
@@ -184,7 +184,7 @@ impl Eval for StringLike {
 }
 
 /// Negated case-sensitive matching. The values can include a multi-character match wildcard (*) anywhere in the string.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct StringNotLike(condition::Body<String>);
 
 impl_str_cond!(StringNotLike);
