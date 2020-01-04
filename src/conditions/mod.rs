@@ -42,8 +42,24 @@
 //!     "effect": "allow",
 //!     "actions": "iam:*AccessKey*",
 //!     "resources": "arn:aws:iam::user/*",
-//!     "condition": {"StringEquals": {"UserAgent": "Example Corp Java Client"}}
+//!     "conditions": [
+//!         {"StringEquals": {"UserAgent": "Example Corp Java Client"}}
+//!     ]
 //!   }
+//! }
+//!
+//! ```
+//!
+//! The following request would be allowed (assuming the policy is attached to the principal):
+//!
+//! ```text
+//! {
+//!     "principal": "users:johndoe",
+//!     "action": "iam:GetAccessKey",
+//!     "resource": "arn:aws:iam::user/key1",
+//!     "context": {
+//!         "UserAgent": "Example Corp Java Client"
+//!     }
 //! }
 //!
 //! ```
