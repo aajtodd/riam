@@ -29,11 +29,11 @@ In the future a higher level service will be built on top of this library to pro
 
 # Concepts
 
-Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL](https://en.wikipedia.org/wiki/Access-control_list)). 
+Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. While there are notable differences the AWS docuementation will be far more complete around the overally subject. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL](https://en.wikipedia.org/wiki/Access-control_list)). 
 
 Notable differences from AWS IAM policies:
-    - riam policies only offer "identity" based policies in AWS terms. In riam's case an identity is abstract though and can represent whatever you want (user, group, machine/service, etc)
-    - `Actions` and `Resources` are also abstract and not predefined. You model your own actions and resources that fit your domain. See the guidelines on [naming](#guidelines)
+* riam policies only offer "identity" based policies in AWS terms. In riam's case an identity is abstract though and can represent whatever you want (user, group, machine/service, etc)
+* `Actions` and `Resources` are also abstract and not predefined. You model your own actions and resources that fit your domain. See the guidelines on [naming](#guidelines)
 
 **Important:** riam is not an identity provider. It doesn't do authentication and knows nothing about authenticated users. In terms of users (principals) it only stores which policies are attached to a particular principal. It's sole purpose is to evaluate authorization decisions *after authentication has already taken place*.
 
@@ -110,10 +110,81 @@ Examples
 
 ## Conditions
 
-TODO - placeholder for conditions
+
+The Condition element (or Condition block) lets you specify conditions for when a policy is in effect. The Condition element is optional.
+In the Condition element, you build expressions in which you use condition operators (equal, less than, etc.) to match the condition keys and values
+in the policy against keys and values in the authorization request context. To learn more about the request context, see [Context](crate::Context).
+
+
+### Evaluation of condition's with multiple keys and/or multiple values
+
+If your policy has multiple condition operators or multiple keys attached to a single condition operator, the conditions are evaluated using a logical AND.
+If a single condition operator includes multiple values for one key, that condition operator is evaluated using a logical OR. All conditions must resolve
+to true to trigger the desired Allow or Deny effect.
+
+#### Example:
+
+```text
+   "StringEquals": {
+       "key1": "value1",
+       "key2": ["value2, value3"]
+   },
+   "DateBefore": {
+       "riam:CurrentTime": "2019/07/22:00:00:00Z"
+   }
+```
+
+- The `StringEquals` and the `DateBefore` conditions are AND'd together.
+- The `StringEquals` `key1` and `key2` conditions are AND'd together (both key1 and key2 must be present and match their values)
+- The `StringEquals` `key2` condition can be either `value1` or `value2`
+
+
+### String Operators
+
+String condition operators let you construct Condition elements that restrict access based on comparing a key's value to a string value.
+
+| Condition Operator        | Description
+|---------------------------|-----------------------------------|
+| StringEquals              | Exact matching, case sensitive
+| StringNotEquals           | Negated matching
+| StringEqualsIgnoreCase    | Exact matching, ignoring case
+| StringNotEqualsIgnoreCase | Negated matching, ignoring case
+| StringLike                | Case-sensitive matching. The values can include a multi-character match wildcard (*).
+| StringNotLike             | Negated case-sensitive matching. The values can include a multi-character match wildcard (*).
+
+
+
+Example: The following statement contains a Condition element that uses the `StringEquals` condition operator with a key `UserAgent` to specify that the request must include a specific value in the user agent header.
+
+```json
+{
+  "statements": {
+    "effect": "allow",
+    "actions": "iam:*AccessKey*",
+    "resources": "arn:aws:iam::user/*",
+    "conditions": [
+        {"StringEquals": {"UserAgent": "Example Corp Java Client"}}
+    ]
+  }
+}
+```
+
+The following request would be allowed (assuming the policy is attached to the principal):
+```json
+{
+    "principal": "users:johndoe",
+    "action": "iam:GetAccessKey",
+    "resource": "arn:aws:iam::user/key1",
+    "context": {
+        "UserAgent": "Example Corp Java Client"
+    }
+}
+```
+
 
 
 # Guidelines
 
 - TODO  guidelines on naming principals, actions, and resources
 - TODO guidelines on securing HTTP API if/when available
+
