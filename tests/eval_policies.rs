@@ -57,6 +57,4 @@ fn engine_is_allowed() {
             i, test.name
         );
     }
-
-    // FIXME - add a test w/condition, see that it fails and then update engine::is_allowed to handle condition eval
 }

@@ -1,0 +1,36 @@
+{
+    "tests": [
+        {
+            "name": "Smoke test",
+            "expected": false,
+            "conditions": [
+                {"StringEquals": {"k1": "v2"}}
+            ],
+            "context": {
+                "k1": "v1"
+            }
+        },
+        {
+            "name": "Missing context key",
+            "expected": false,
+            "conditions": [
+                {"StringEquals": {"k1": "v1"}}
+            ],
+            "context": {
+                "other": "foo"
+            }
+        },
+        {
+            "name": "Multiple conditions must match",
+            "expected": false,
+            "conditions": [
+                {"StringEquals": {"k1": "v1"}},
+                {"StringNotLike": {"k2": "value*2*"}}
+            ],
+            "context": {
+                "k1": "v1",
+                "k2": "value200"
+            }
+        }
+    ]
+}
