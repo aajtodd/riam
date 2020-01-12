@@ -1,7 +1,9 @@
 use crate::Context;
+use either::Either;
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::iter::Iterator;
 
 use super::string::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase,
@@ -17,6 +19,17 @@ use super::string::{
 pub(in crate::conditions) enum ScalarOrSeq<T> {
     Scalar(T),
     Seq(Vec<T>),
+}
+
+impl<T> ScalarOrSeq<T> {
+    /// Allow conditions to iterate over the value or values without worrying about
+    /// what variant it is.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        match *self {
+            ScalarOrSeq::Scalar(ref sc) => Either::Left(std::iter::once(sc)),
+            ScalarOrSeq::Seq(ref seq) => Either::Right(seq.iter()),
+        }
+    }
 }
 
 // Condition Body

@@ -1,4 +1,4 @@
-use super::condition::{self, Body, ScalarOrSeq};
+use super::condition::{self, Body};
 use super::Eval;
 use crate::wildcard;
 use crate::Context;
@@ -59,10 +59,7 @@ impl Eval for StringEquals {
                 .get(key)
                 .and_then(|x| x.as_str())
                 // possible value's are OR'd together for evaluation (only 1 needs to pass)
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(x == sc),
-                    ScalarOrSeq::Seq(seq) => Some(seq.iter().any(|s| s == x)),
-                })
+                .and_then(|x| Some(values.iter().any(|s| s == x)))
                 .unwrap_or(false);
 
             if !valid {
@@ -85,10 +82,7 @@ impl Eval for StringNotEquals {
             let valid = ctx
                 .get(key)
                 .and_then(|x| x.as_str())
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(x != sc),
-                    ScalarOrSeq::Seq(seq) => Some(!seq.iter().any(|s| s == x)),
-                })
+                .and_then(|x| Some(!values.iter().any(|s| s == x)))
                 .unwrap_or(false);
 
             if !valid {
@@ -112,12 +106,7 @@ impl Eval for StringEqualsIgnoreCase {
                 .get(key)
                 .and_then(|x| x.as_str())
                 .and_then(|x| Some(x.to_lowercase()))
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(x.to_lowercase() == sc.to_lowercase()),
-                    ScalarOrSeq::Seq(seq) => {
-                        Some(seq.iter().map(|v| v.to_lowercase()).any(|v| v == x))
-                    }
-                })
+                .and_then(|x| Some(values.iter().map(|v| v.to_lowercase()).any(|v| v == x)))
                 .unwrap_or(false);
 
             if !valid {
@@ -141,12 +130,7 @@ impl Eval for StringNotEqualsIgnoreCase {
                 .get(key)
                 .and_then(|x| x.as_str())
                 .and_then(|x| Some(x.to_lowercase()))
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(x.to_lowercase() != sc.to_lowercase()),
-                    ScalarOrSeq::Seq(seq) => {
-                        Some(seq.iter().map(|v| v.to_lowercase()).all(|v| v != x))
-                    }
-                })
+                .and_then(|x| Some(values.iter().map(|v| v.to_lowercase()).all(|v| v != x)))
                 .unwrap_or(false);
 
             if !valid {
@@ -169,10 +153,7 @@ impl Eval for StringLike {
             let valid = ctx
                 .get(key)
                 .and_then(|x| x.as_str())
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(wildcard::matches(sc, x)),
-                    ScalarOrSeq::Seq(seq) => Some(seq.iter().any(|p| wildcard::matches(p, x))),
-                })
+                .and_then(|x| Some(values.iter().any(|p| wildcard::matches(p, x))))
                 .unwrap_or(false);
 
             if !valid {
@@ -195,10 +176,7 @@ impl Eval for StringNotLike {
             let valid = ctx
                 .get(key)
                 .and_then(|x| x.as_str())
-                .and_then(|x| match values {
-                    ScalarOrSeq::Scalar(sc) => Some(!wildcard::matches(sc, x)),
-                    ScalarOrSeq::Seq(seq) => Some(seq.iter().all(|p| !wildcard::matches(p, x))),
-                })
+                .and_then(|x| Some(values.iter().all(|p| !wildcard::matches(p, x))))
                 .unwrap_or(false);
 
             if !valid {
