@@ -1,16 +1,67 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// Authorization request context. Consists of key/value pairs that the caller is expected to
-/// gather and send with a request to enable condition evaluation. A policy that has conditions
-/// will fail if the context is missing.
+/// gather and send with a request to enable condition evaluation.
+///
+/// A policy that has conditions (with the exception of `IfExists` conditions) will fail if the context is missing.
+/// A condition will also fail if the context value does not match the expected values for the condition.
+/// e.g. A `StringEquals` condition only accepts a scalar string value or a sequence
+/// of strings (`"v1"` or `["v1", "v2"]`). It does not accept numeric, null, map values, etc.
+///
 #[derive(Serialize, Deserialize, Default, PartialEq, Debug)]
-pub struct Context(pub HashMap<String, String>);
+pub struct Context(HashMap<String, Value>);
 
 impl Context {
+    /// Create a new request context conditions will be evaluated against.
+    pub fn new() -> Self {
+        Context::default()
+    }
+
+    /// Insert a key value pair into the context under the given key.
+    /// Unlike Rust standard Map types, values are replaced not updated.
+    ///
+    /// # Example
+    /// ```
+    /// # use riam::Context;
+    /// let mut context = Context::new();
+    /// context.insert("str", "mystring")
+    ///        .insert("int", 2)
+    ///        .insert("float", 3.4)
+    ///        .insert("array", vec!["v1", "v2", "v3"]);
+    ///
+    /// // Resulting context:
+    /// // {
+    /// //     "str": "mystring",
+    /// //     "int": 2,
+    /// //     "float": 3.4,
+    /// //     "array": ["v1", "v2", "v3"]
+    /// // }
+    /// ```
+    ///
+    pub fn insert<'a, K, V>(&'a mut self, k: K, v: V) -> &'a mut Self
+    where
+        K: Into<String>,
+        V: Into<Value>,
+    {
+        self.0.insert(k.into(), v.into());
+        self
+    }
+
     /// Returns `true` if the context contains no values.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order. The iterator element type is (&'a String, &'a Value).
+    pub fn iter(&self) -> ::std::collections::hash_map::Iter<String, Value> {
+        self.0.iter()
+    }
+
+    /// Returns a reference to the value corresponding to the key.
+    pub fn get(&self, k: &str) -> Option<&Value> {
+        self.0.get(k)
     }
 }
 
@@ -57,17 +108,18 @@ impl AuthRequest {
     /// # Example
     /// ```
     /// # use riam::AuthRequest;
+    /// # use serde_json::Value;
     /// let mut req = AuthRequest::new("users:john", "actions:list-accounts", "resources:account:123");
     /// req.with_context("k1", "v1")
     ///    .with_context("k2", "v2");
-    /// assert_eq!(req.context.0.get("k1"), Some(&"v1".to_owned()));
+    /// assert_eq!(req.context.get("k1"), Some(&Value::String("v1".into())));
     /// ```
-    pub fn with_context<'a, T>(&'a mut self, key: T, value: T) -> &'a mut Self
+    pub fn with_context<'a, K, T>(&'a mut self, key: K, value: T) -> &'a mut Self
     where
-        T: Into<String>,
+        K: Into<String>,
+        T: Into<Value>,
     {
-        // let ctx = self.context.get_or_insert_with(Context::default);
-        self.context.0.insert(key.into(), value.into());
+        self.context.insert(key.into(), value.into());
         self
     }
 }
@@ -79,13 +131,13 @@ mod tests {
 
     #[test]
     fn test_auth_request_serialization() {
-        let mut ctx_map = HashMap::new();
-        ctx_map.insert("k1".to_owned(), "v1".to_owned());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "v1");
         let req = AuthRequest {
             principal: "users:test-user".into(),
             action: "actions:list-accounts".into(),
             resource: "resources:accounts:123".into(),
-            context: Context(ctx_map),
+            context: ctx,
         };
 
         assert_tokens(

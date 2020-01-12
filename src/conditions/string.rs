@@ -56,12 +56,12 @@ impl Eval for StringEquals {
         for (key, values) in (self.0).0.iter() {
             // all keys are and'd together to pass the condition
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 // possible value's are OR'd together for evaluation (only 1 needs to pass)
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(x == sc),
-                    ScalarOrSeq::Seq(seq) => Some(seq.contains(x)),
+                    ScalarOrSeq::Seq(seq) => Some(seq.iter().any(|s| s == x)),
                 })
                 .unwrap_or(false);
 
@@ -83,11 +83,11 @@ impl Eval for StringNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
         for (key, values) in (self.0).0.iter() {
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(x != sc),
-                    ScalarOrSeq::Seq(seq) => Some(!seq.contains(x)),
+                    ScalarOrSeq::Seq(seq) => Some(!seq.iter().any(|s| s == x)),
                 })
                 .unwrap_or(false);
 
@@ -109,8 +109,8 @@ impl Eval for StringEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
         for (key, values) in (self.0).0.iter() {
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 .and_then(|x| Some(x.to_lowercase()))
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(x.to_lowercase() == sc.to_lowercase()),
@@ -138,8 +138,8 @@ impl Eval for StringNotEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
         for (key, values) in (self.0).0.iter() {
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 .and_then(|x| Some(x.to_lowercase()))
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(x.to_lowercase() != sc.to_lowercase()),
@@ -167,8 +167,8 @@ impl Eval for StringLike {
     fn evaluate(&self, ctx: &Context) -> bool {
         for (key, values) in (self.0).0.iter() {
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(wildcard::matches(sc, x)),
                     ScalarOrSeq::Seq(seq) => Some(seq.iter().any(|p| wildcard::matches(p, x))),
@@ -193,8 +193,8 @@ impl Eval for StringNotLike {
     fn evaluate(&self, ctx: &Context) -> bool {
         for (key, values) in (self.0).0.iter() {
             let valid = ctx
-                .0
                 .get(key)
+                .and_then(|x| x.as_str())
                 .and_then(|x| match values {
                     ScalarOrSeq::Scalar(sc) => Some(!wildcard::matches(sc, x)),
                     ScalarOrSeq::Seq(seq) => Some(seq.iter().all(|p| !wildcard::matches(p, x))),
@@ -261,19 +261,19 @@ mod tests {
         // singular
         let cond = StringEquals::new("k1", "v1");
 
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "v1".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "v1");
 
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "v2".to_owned());
+        ctx.insert("k1", "v2");
         assert!(!cond.evaluate(&ctx));
 
         // multiple allowed
         let cond = StringEquals::new("k1", "v1").add("k1", "v2");
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "v3".to_owned());
+        ctx.insert("k1", "v3");
         assert!(!cond.evaluate(&ctx));
     }
 
@@ -281,18 +281,18 @@ mod tests {
     fn test_eval_string_not_equals() {
         // singular
         let cond = StringNotEquals::new("k1", "v1");
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "v2".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "v2");
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "v1".to_owned());
+        ctx.insert("k1", "v1");
         assert!(!cond.evaluate(&ctx));
 
         // multiple not allowed
         let cond = StringNotEquals::new("k1", "v1").add("k1", "v2");
         assert!(!cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "v3".to_owned());
+        ctx.insert("k1", "v3");
         assert!(cond.evaluate(&ctx));
     }
 
@@ -301,19 +301,19 @@ mod tests {
         // singular
         let cond = StringEqualsIgnoreCase::new("k1", "value1");
 
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "VaLue1".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "VaLue1");
 
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "value2".to_owned());
+        ctx.insert("k1", "value2");
         assert!(!cond.evaluate(&ctx));
 
         // multiple allowed
         let cond = StringEqualsIgnoreCase::new("k1", "VaLue1").add("k1", "ValUE2");
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "v3".to_owned());
+        ctx.insert("k1", "v3");
         assert!(!cond.evaluate(&ctx));
     }
 
@@ -322,19 +322,19 @@ mod tests {
         // singular
         let cond = StringNotEqualsIgnoreCase::new("k1", "value1");
 
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "VaLue2".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "VaLue2");
 
         assert!(cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "VaLue1".to_owned());
+        ctx.insert("k1", "VaLue1");
         assert!(!cond.evaluate(&ctx));
 
         // multiple not allowed
         let cond = StringNotEqualsIgnoreCase::new("k1", "VaLue1").add("k1", "ValUE2");
         assert!(!cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".to_owned(), "VaLue3".to_owned());
+        ctx.insert("k1", "VaLue3");
         assert!(cond.evaluate(&ctx));
     }
 
@@ -343,21 +343,19 @@ mod tests {
         // singular
         let cond = StringLike::new("k1", "re*123");
 
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "resources:blog:123".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "resources:blog:123");
 
         assert!(cond.evaluate(&ctx));
 
-        ctx.0
-            .insert("k1".to_owned(), "resources:blog:456".to_owned());
+        ctx.insert("k1", "resources:blog:456");
         assert!(!cond.evaluate(&ctx));
 
         // multiple allowed
         let cond = StringLike::new("k1", "resources:*:123").add("k1", "resources:*:456");
         assert!(cond.evaluate(&ctx));
 
-        ctx.0
-            .insert("k1".to_owned(), "resources:blog:789".to_owned());
+        ctx.insert("k1", "resources:blog:789");
         assert!(!cond.evaluate(&ctx));
     }
 
@@ -366,20 +364,19 @@ mod tests {
         // singular
         let cond = StringNotLike::new("k1", "re*123");
 
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "resources:blog:123".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "resources:blog:123");
 
         assert!(!cond.evaluate(&ctx));
 
-        ctx.0.insert("k1".into(), "resources:blog:456".into());
+        ctx.insert("k1", "resources:blog:456");
         assert!(cond.evaluate(&ctx));
 
         // multiple not allowed
         let cond = StringNotLike::new("k1", "resources:*:123").add("k1", "resources:*:456");
         assert!(!cond.evaluate(&ctx));
 
-        ctx.0
-            .insert("k1".to_owned(), "resources:blog:789".to_owned());
+        ctx.insert("k1", "resources:blog:789");
         assert!(cond.evaluate(&ctx));
     }
 }

@@ -189,8 +189,8 @@ mod tests {
     fn test_cond_eval() {
         // test a condition.eval() works (via enum_dispatch) off the enum not just the concrete types
         let cond: Condition = StringEquals::new("k1", "v1").into();
-        let mut ctx = Context(HashMap::new());
-        ctx.0.insert("k1".into(), "v1".into());
+        let mut ctx = Context::new();
+        ctx.insert("k1", "v1");
         assert!(cond.evaluate(&ctx));
     }
 }
