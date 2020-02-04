@@ -75,7 +75,7 @@ impl PolicyManager for MemoryManager {
 
     /// List all policies
     fn list(&self) -> Result<Vec<Policy>> {
-        Ok(Vec::new())
+        unimplemented!("FIXME - implement list all policies")
     }
 
     /// Get all policies for a given principal
