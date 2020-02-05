@@ -1,14 +1,34 @@
 use crate::Context;
 use either::Either;
 use enum_dispatch::enum_dispatch;
+use serde::de::{self, Deserializer, Visitor};
+use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::iter::Iterator;
 
 use super::string::{
-    StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase,
-    StringNotLike,
+    StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
+
+/// Modifiers that change the way a condition evaluates the request context
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum EvalModifier {
+    /// ForAllValues tests whether the value of every member of the request set is a subset of the condition key set.
+    /// The condition returns true if every key value in the request matches at least one value in the policy. It also returns
+    /// true if there are no keys in the request, or if the key values resolve to a null data set, such as an empty string.
+    ForAllValues,
+
+    /// ForAnyValue tests whether at least one member of the set of request values matches at least one member of the set of condition key values.
+    /// The condition returns true if any one of the key values in the request matches any one of the condition values in the policy. For no matching
+    /// key or a null dataset, the condition returns false
+    ForAnyValue,
+
+    /// IfExists modifies the condition such that if the key is present in the context of the request, process the key as specified in the policy.
+    /// If the key is not present, evaluate the condition element as true.
+    IfExists,
+}
 
 // Scalar (singular) or sequence (multiple) of values.
 //
@@ -89,7 +109,7 @@ pub trait Eval {
 /// A statement may contain more than one condition.
 #[allow(missing_docs)] // Doc comments are broke with enum_dispatch
 #[enum_dispatch]
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Condition {
     StringEquals,
     StringNotEquals,
@@ -97,6 +117,122 @@ pub enum Condition {
     StringNotEqualsIgnoreCase,
     StringLike,
     StringNotLike,
+}
+
+// The only way to get modifiers on the serialized format of a policy condition to match the syntax
+// of AWS conditions is to implement custom serialization somewhere.
+impl Serialize for Condition {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match *self {
+            Condition::StringEquals(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 0, c.serialized_name(), c)
+            }
+            Condition::StringNotEquals(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 1, c.serialized_name(), c)
+            }
+            Condition::StringEqualsIgnoreCase(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 2, c.serialized_name(), c)
+            }
+            Condition::StringNotEqualsIgnoreCase(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 3, c.serialized_name(), c)
+            }
+            Condition::StringLike(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 4, c.serialized_name(), c)
+            }
+            Condition::StringNotLike(ref c) => {
+                serializer.serialize_newtype_variant("Condition", 5, c.serialized_name(), c)
+            }
+        }
+    }
+}
+
+// create a condition with an eval modifier set
+macro_rules! de_cond_wmod {
+    ( $t:ident, $m:ident, $modifier:ident) => {{
+        let mut c: $t = $m.next_value()?;
+        c.with_modifier(EvalModifier::$modifier);
+        Ok(Condition::$t(c))
+    }};
+}
+
+// delegate to the normal deserialization for a condition
+macro_rules! de_cond {
+    ( $t:ident, $m:ident) => {{
+        Ok(Condition::$t($m.next_value::<$t>()?))
+    }};
+}
+
+struct ConditionVisitor;
+
+impl<'de> Visitor<'de> for ConditionVisitor {
+    type Value = Condition;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a Condition")
+    }
+
+    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    where
+        M: de::MapAccess<'de>,
+    {
+        let key: Option<&str> = map.next_key()?;
+        if key.is_none() {
+            return Err(de::Error::invalid_value(
+                de::Unexpected::Str("missing condition name"),
+                &self,
+            ));
+        }
+
+        let key: &str = key.unwrap();
+        match key {
+            "StringEquals" => de_cond!(StringEquals, map),
+            "IfExists:StringEquals" => de_cond_wmod!(StringEquals, map, IfExists),
+            "ForAnyValue:StringEquals" => de_cond_wmod!(StringEquals, map, ForAnyValue),
+            "ForAllValues:StringEquals" => de_cond_wmod!(StringEquals, map, ForAllValues),
+
+            "StringNotEquals" => de_cond!(StringNotEquals, map),
+            "IfExists:StringNotEquals" => de_cond_wmod!(StringNotEquals, map, IfExists),
+            "ForAnyValue:StringNotEquals" => de_cond_wmod!(StringNotEquals, map, ForAnyValue),
+            "ForAllValues:StringNotEquals" => de_cond_wmod!(StringNotEquals, map, ForAllValues),
+
+            "StringEqualsIgnoreCase" => de_cond!(StringEqualsIgnoreCase, map),
+            "IfExists:StringEqualsIgnoreCase" => de_cond_wmod!(StringEqualsIgnoreCase, map, IfExists),
+            "ForAnyValue:StringEqualsIgnoreCase" => de_cond_wmod!(StringEqualsIgnoreCase, map, ForAnyValue),
+            "ForAllValues:StringEqualsIgnoreCase" => de_cond_wmod!(StringEqualsIgnoreCase, map, ForAllValues),
+
+            "StringNotEqualsIgnoreCase" => de_cond!(StringNotEqualsIgnoreCase, map),
+            "IfExists:StringNotEqualsIgnoreCase" => de_cond_wmod!(StringNotEqualsIgnoreCase, map, IfExists),
+            "ForAnyValue:StringNotEqualsIgnoreCase" => de_cond_wmod!(StringNotEqualsIgnoreCase, map, ForAnyValue),
+            "ForAllValues:StringNotEqualsIgnoreCase" => de_cond_wmod!(StringNotEqualsIgnoreCase, map, ForAllValues),
+
+            "StringLike" => de_cond!(StringLike, map),
+            "IfExists:StringLike" => de_cond_wmod!(StringLike, map, IfExists),
+            "ForAnyValue:StringLike" => de_cond_wmod!(StringLike, map, ForAnyValue),
+            "ForAllValues:StringLike" => de_cond_wmod!(StringLike, map, ForAllValues),
+
+            "StringNotLike" => de_cond!(StringNotLike, map),
+            "IfExists:StringNotLike" => de_cond_wmod!(StringNotLike, map, IfExists),
+            "ForAnyValue:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAnyValue),
+            "ForAllValues:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAllValues),
+
+            _ => Err(de::Error::invalid_value(
+                de::Unexpected::Str("unrecognized condition type"),
+                &self,
+            )),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Condition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(ConditionVisitor)
+    }
 }
 
 #[cfg(test)]
@@ -153,8 +289,7 @@ mod tests {
         "#;
 
         let actual: ScalarOrSeq<String> = serde_json::from_str(jsp).unwrap();
-        let expected: ScalarOrSeq<String> =
-            ScalarOrSeq::Seq(vec!["v1".to_owned(), "v2".to_owned()]);
+        let expected: ScalarOrSeq<String> = ScalarOrSeq::Seq(vec!["v1".to_owned(), "v2".to_owned()]);
         assert_eq!(expected, actual);
 
         let serialized = serde_json::to_string(&expected).unwrap();
