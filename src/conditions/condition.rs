@@ -1,8 +1,7 @@
 use crate::Context;
-use either::Either;
 use enum_dispatch::enum_dispatch;
 use serde::de::{self, Deserializer, Visitor};
-use serde::ser::Serializer;
+use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -41,17 +40,6 @@ pub(in crate::conditions) enum ScalarOrSeq<T> {
     Seq(Vec<T>),
 }
 
-impl<T> ScalarOrSeq<T> {
-    /// Allow conditions to iterate over the value or values without worrying about
-    /// what variant it is.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        match *self {
-            ScalarOrSeq::Scalar(ref sc) => Either::Left(std::iter::once(sc)),
-            ScalarOrSeq::Seq(ref seq) => Either::Right(seq.iter()),
-        }
-    }
-}
-
 // Condition Body
 //
 // Condition bodies are all typically made of 1 or more keys that are mapped to one or more values allowed.
@@ -68,8 +56,8 @@ impl<T> ScalarOrSeq<T> {
 //
 // This is a shared implementation detail of concrete conditions
 //
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub(in crate::conditions) struct Body<T>(pub(in crate::conditions) HashMap<String, ScalarOrSeq<T>>);
+#[derive(Debug, PartialEq, Clone)]
+pub(in crate::conditions) struct Body<T>(pub(in crate::conditions) HashMap<String, Vec<T>>);
 
 impl<T> Body<T> {
     /// Construct a new Body<T> with the initial key/value pair.
@@ -82,19 +70,48 @@ impl<T> Body<T> {
     /// Insert a new key/value pair into this condition body. If the key already exists, the new
     /// value is appended to the list of acceptable values for that key
     pub fn insert(&mut self, k: String, v: T) {
-        // replace the existing entry if it exists with a seq, or construct a new scalar
-        let updated = match self.0.remove(&k) {
-            Some(curr) => match curr {
-                ScalarOrSeq::Scalar(sc) => ScalarOrSeq::Seq(vec![sc, v]),
-                ScalarOrSeq::Seq(mut seq) => {
-                    seq.push(v);
-                    ScalarOrSeq::Seq(seq)
-                }
-            },
-            None => ScalarOrSeq::Scalar(v),
-        };
+        self.0.entry(k).or_insert_with(Vec::new).push(v);
+    }
+}
 
-        self.0.insert(k, updated);
+impl<V> Serialize for Body<V>
+where
+    V: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (k, v) in self.0.iter() {
+            if v.len() == 1 {
+                map.serialize_entry(&k, &v[0])?;
+            } else {
+                map.serialize_entry(&k, &v)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de, V> Deserialize<'de> for Body<V>
+where
+    V: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // deserialize through ScalarOrSeq which handles both cases then map to our target type
+        let v = HashMap::<String, ScalarOrSeq<V>>::deserialize(deserializer)?;
+        let body: HashMap<String, Vec<V>> = v
+            .into_iter()
+            .map(|(k, v)| match v {
+                ScalarOrSeq::Scalar(sc) => (k, vec![sc]),
+                ScalarOrSeq::Seq(seq) => (k, seq),
+            })
+            .collect();
+        Ok(Body(body))
     }
 }
 
@@ -241,6 +258,7 @@ mod tests {
 
     #[test]
     fn test_cond_body_json() {
+        // test that body deserializes/serializes with both scalar and seq values
         let jsp = r#"
         {
             "k1": "v1",
@@ -249,12 +267,9 @@ mod tests {
         "#;
 
         let actual: Body<String> = serde_json::from_str(jsp).unwrap();
-        let mut map = HashMap::new();
-        map.insert("k1".to_owned(), ScalarOrSeq::Scalar("v1".to_owned()));
-        map.insert(
-            "k2".to_owned(),
-            ScalarOrSeq::Seq(vec!["v2".to_owned(), "v3".to_owned()]),
-        );
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        map.insert("k1".to_owned(), vec!["v1".to_owned()]);
+        map.insert("k2".to_owned(), vec!["v2".to_owned(), "v3".to_owned()]);
         let expected = Body(map);
         assert_eq!(expected, actual);
 

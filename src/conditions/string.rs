@@ -81,7 +81,7 @@ pub struct StringEquals {
 impl_str_cond!(StringEquals);
 
 // Test whether the context values are a subset of the condition values
-fn is_subset<'a, T, F>(cond_values: &ScalarOrSeq<T>, ctx_values: &[T], cmp: F) -> bool
+fn is_subset<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
 where
     F: Fn(&T, &T) -> bool,
 {
@@ -100,7 +100,7 @@ where
 }
 
 // Test whether any of the context values match at least one of the condition values
-fn for_any_match<'a, T, F>(cond_values: &ScalarOrSeq<T>, ctx_values: &[T], cmp: F) -> bool
+fn for_any_match<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
 where
     F: Fn(&T, &T) -> bool,
     T: ::std::fmt::Debug,
