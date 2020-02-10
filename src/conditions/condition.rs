@@ -235,10 +235,10 @@ impl<'de> Visitor<'de> for ConditionVisitor {
             "ForAnyValue:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAnyValue),
             "ForAllValues:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAllValues),
 
-            _ => Err(de::Error::invalid_value(
-                de::Unexpected::Str("unrecognized condition type"),
-                &self,
-            )),
+            _ => {
+                let msg = format!("unrecognized condition '{}'", key);
+                Err(de::Error::invalid_value(de::Unexpected::Str(&msg), &self))
+            }
         }
     }
 }
@@ -355,5 +355,19 @@ mod tests {
         let mut ctx = Context::new();
         ctx.insert("k1", "v1");
         assert!(cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_invalid_cond_json() {
+        let jsp = r#"
+            {
+                "unknown": {
+                    "mykey": "myvalue"
+                }
+            }
+        "#;
+
+        let actual: Result<Condition, serde_json::Error> = serde_json::from_str(jsp);
+        assert!(actual.is_err());
     }
 }
