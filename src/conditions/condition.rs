@@ -74,9 +74,9 @@ impl<T> Body<T> {
     }
 }
 
-impl<V> Serialize for Body<V>
+impl<T> Serialize for Body<T>
 where
-    V: Serialize,
+    T: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -94,17 +94,17 @@ where
     }
 }
 
-impl<'de, V> Deserialize<'de> for Body<V>
+impl<'de, T> Deserialize<'de> for Body<T>
 where
-    V: Deserialize<'de>,
+    T: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         // deserialize through ScalarOrSeq which handles both cases then map to our target type
-        let v = HashMap::<String, ScalarOrSeq<V>>::deserialize(deserializer)?;
-        let body: HashMap<String, Vec<V>> = v
+        let v = HashMap::<String, ScalarOrSeq<T>>::deserialize(deserializer)?;
+        let body: HashMap<String, Vec<T>> = v
             .into_iter()
             .map(|(k, v)| match v {
                 ScalarOrSeq::Scalar(sc) => (k, vec![sc]),
