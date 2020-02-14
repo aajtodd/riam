@@ -113,6 +113,16 @@ where
     false
 }
 
+// test whether all of the context values are not equal to any of the condition values, equivalent
+// to testing for the empty intersection
+fn is_disjoint<T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
+where
+    F: Fn(&T, &T) -> bool,
+    T: ::std::fmt::Debug,
+{
+    !intersects(cond_values, ctx_values, cmp)
+}
+
 // Test whether any of the context values match at least one of the condition values
 fn for_any_match<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
 where
@@ -139,47 +149,46 @@ fn serde_json_value_to_vec(v: serde_json::Value) -> Result<Vec<String>, serde_js
     Ok(seq)
 }
 
-/// Exact matching, case sensitive
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct StringEquals {
-    #[serde(skip)]
-    modifier: Option<EvalModifier>,
+macro_rules! eval_str_cond {
+    ($cond:ident, $ctx:ident, $cmp:expr) => {{
+        // use the same comparison lambda for both forall/forany as well as the singular case
+        eval_str_cond!($cond, $ctx, $cmp, $cmp)
+    }};
 
-    #[serde(flatten)]
-    body: condition::Body<String>,
-}
-
-impl_str_cond!(StringEquals);
-
-impl Eval for StringEquals {
-    fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
+    // condition, context, lambda used for comparison (plural), lambda used for comparison (singular)
+    // ... why the distinction you ask. Well the signatures of for_any_match, is_subset, etc do not
+    // match the signature of the singular case (&String vs &str). I'm sure there is a way around
+    // this but I haven't seen a clean way that keeps the functions generic over any type T without
+    // be more specific and specifying &str (which would fix the ambiguity and difference between
+    // the two cases). For now allow the closures to be specified independently *if needed*.
+    ($cond:ident, $ctx:ident, $cmp:expr, $scmp:expr) => {{
+        let default = match $cond.modifier {
             Some(EvalModifier::IfExists) => true,
             _ => false,
         };
 
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
+        for (key, values) in $cond.body.0.iter() {
+            let valid = $ctx
                 .get(key)
                 .and_then(|x| {
-                    match self.modifier {
+                    match $cond.modifier {
                         Some(EvalModifier::ForAllValues) => {
                             // all the incoming request context values for the key need to be a subset
                             // of the condition values
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(is_subset(values, ctx_values.as_slice(), |x, y| x == y))
+                            Some(is_subset(values, ctx_values.as_slice(), $cmp))
                         }
                         Some(EvalModifier::ForAnyValue) => {
                             // at least one of the context values has to match a condition value
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| x == y))
+                            Some(for_any_match(values, ctx_values.as_slice(), $cmp))
                         }
                         // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
                         // context is expected to be scalar. If it is a sequence the conditions
                         // should be using set modifiers
                         _ => x
                             .as_str()
-                            .and_then(|v| Some(values.iter().any(|s| s == v)))
+                            .and_then(|v| Some(values.iter().any(|s| $scmp(s, v))))
                             // it is important that if as_str() returns None that we don't use the
                             // default. It should be false no matter what if the conversion fails
                             // as we are expecting a string here AND the key did exist. This mostly
@@ -195,6 +204,79 @@ impl Eval for StringEquals {
             }
         }
         true
+    }};
+}
+
+macro_rules! eval_str_not_cond {
+    ($cond:ident, $ctx:ident, $cmp:expr) => {{
+        // use the same comparison lambda for both forall/forany as well as the singular case
+        eval_str_not_cond!($cond, $ctx, $cmp, $cmp)
+    }};
+    // condition, context, lambda used for comparison (the lambda be the equals case. The inversion
+    // is handled internally to the macro, e.g. |x,y| x == y should be used instead of |x,y| x !=
+    // y). This is to handle the different modifier cases.
+    // NOTE: See the comments on eval_str_cond!() for why scmp ugliness is part of the equation
+    ($cond:ident, $ctx:ident, $cmp:expr, $scmp:expr) => {{
+        let default = match $cond.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
+        for (key, values) in $cond.body.0.iter() {
+            let valid = $ctx
+                .get(key)
+                .and_then(|x| {
+                    match $cond.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to NOT
+                            // match any of the condition values (i.e. they do not intersect)
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(is_disjoint(values, ctx_values.as_slice(), $cmp))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to _not_ match a condition value (hence the inversion)
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| !($cmp(x, y))))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(!values.iter().any(|s| $scmp(s, v))))
+                            // it is important that if as_str() returns None that we don't use the
+                            // default. It should be false no matter what if the conversion fails
+                            // as we are expecting a string here AND the key did exist. This mostly
+                            // affects IfExists where the default is true
+                            .or(Some(false)),
+                    }
+                })
+                .unwrap_or(default);
+
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
+            if !valid {
+                return false;
+            }
+        }
+        true
+    }};
+}
+
+/// Exact matching, case sensitive
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct StringEquals {
+    #[serde(skip)]
+    modifier: Option<EvalModifier>,
+
+    #[serde(flatten)]
+    body: condition::Body<String>,
+}
+
+impl_str_cond!(StringEquals);
+
+impl Eval for StringEquals {
+    fn evaluate(&self, ctx: &Context) -> bool {
+        eval_str_cond!(self, ctx, |x, y| x == y)
     }
 }
 
@@ -212,44 +294,7 @@ impl_str_cond!(StringNotEquals);
 
 impl Eval for StringNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
-            Some(EvalModifier::IfExists) => true,
-            _ => false,
-        };
-
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
-                .get(key)
-                .and_then(|x| {
-                    match self.modifier {
-                        Some(EvalModifier::ForAllValues) => {
-                            // all the incoming request context values for the key need to NOT be a subset
-                            // of the condition values
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(!intersects(values, ctx_values.as_slice(), |x, y| x == y))
-                        }
-                        Some(EvalModifier::ForAnyValue) => {
-                            // at least one of the context values has to NOT match a condition value
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| x != y))
-                        }
-                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
-                        // context is expected to be scalar. If it is a sequence the conditions
-                        // should be using set modifiers
-                        _ => x
-                            .as_str()
-                            .and_then(|v| Some(!values.iter().any(|s| s == v)))
-                            .or(Some(false)),
-                    }
-                })
-                .unwrap_or(default);
-
-            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-            if !valid {
-                return false;
-            }
-        }
-        true
+        eval_str_not_cond!(self, ctx, |x, y| x == y)
     }
 }
 
@@ -267,48 +312,13 @@ impl_str_cond!(StringEqualsIgnoreCase);
 
 impl Eval for StringEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
-            Some(EvalModifier::IfExists) => true,
-            _ => false,
-        };
-
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
-                .get(key)
-                .and_then(|x| {
-                    match self.modifier {
-                        Some(EvalModifier::ForAllValues) => {
-                            // all the incoming request context values for the key need to NOT be a subset
-                            // of the condition values
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(is_subset(values, ctx_values.as_slice(), |x, y| {
-                                x.to_lowercase() == y.to_lowercase()
-                            }))
-                        }
-                        Some(EvalModifier::ForAnyValue) => {
-                            // at least one of the context values has to NOT match a condition value
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| {
-                                x.to_lowercase() == y.to_lowercase()
-                            }))
-                        }
-                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
-                        // context is expected to be scalar. If it is a sequence the conditions
-                        // should be using set modifiers
-                        _ => x
-                            .as_str()
-                            .and_then(|v| Some(values.iter().any(|s| s.to_lowercase() == v.to_lowercase())))
-                            .or(Some(false)),
-                    }
-                })
-                .unwrap_or(default);
-
-            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-            if !valid {
-                return false;
-            }
-        }
-        true
+        eval_str_cond!(
+            self,
+            ctx,
+            |x: &String, y: &String| x.to_lowercase() == y.to_lowercase(),
+            // the singular case has a different signature, ugly hack for now
+            |x: &str, y: &str| x.to_lowercase() == y.to_lowercase()
+        )
     }
 }
 
@@ -326,48 +336,13 @@ impl_str_cond!(StringNotEqualsIgnoreCase);
 
 impl Eval for StringNotEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
-            Some(EvalModifier::IfExists) => true,
-            _ => false,
-        };
-
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
-                .get(key)
-                .and_then(|x| {
-                    match self.modifier {
-                        Some(EvalModifier::ForAllValues) => {
-                            // all the incoming request context values for the key need to NOT be a subset
-                            // of the condition values
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(!intersects(values, ctx_values.as_slice(), |x, y| {
-                                x.to_lowercase() == y.to_lowercase()
-                            }))
-                        }
-                        Some(EvalModifier::ForAnyValue) => {
-                            // at least one of the context values has to NOT match a condition value
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| {
-                                x.to_lowercase() != y.to_lowercase()
-                            }))
-                        }
-                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
-                        // context is expected to be scalar. If it is a sequence the conditions
-                        // should be using set modifiers
-                        _ => x
-                            .as_str()
-                            .and_then(|v| Some(!values.iter().any(|s| s.to_lowercase() == v.to_lowercase())))
-                            .or(Some(false)),
-                    }
-                })
-                .unwrap_or(default);
-
-            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-            if !valid {
-                return false;
-            }
-        }
-        true
+        eval_str_not_cond!(
+            self,
+            ctx,
+            |x: &String, y: &String| x.to_lowercase() == y.to_lowercase(),
+            // the singular case has a different signature, ugly hack for now
+            |x: &str, y: &str| x.to_lowercase() == y.to_lowercase()
+        )
     }
 }
 
@@ -385,46 +360,7 @@ impl_str_cond!(StringLike);
 
 impl Eval for StringLike {
     fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
-            Some(EvalModifier::IfExists) => true,
-            _ => false,
-        };
-
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
-                .get(key)
-                .and_then(|x| {
-                    match self.modifier {
-                        Some(EvalModifier::ForAllValues) => {
-                            // all the incoming request context values for the key need to be a subset
-                            // of the condition values
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(is_subset(values, ctx_values.as_slice(), |p, y| wildcard::matches(p, y)))
-                        }
-                        Some(EvalModifier::ForAnyValue) => {
-                            // at least one of the context values has to match a condition value
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |p, y| {
-                                wildcard::matches(p, y)
-                            }))
-                        }
-                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
-                        // context is expected to be scalar. If it is a sequence the conditions
-                        // should be using set modifiers
-                        _ => x
-                            .as_str()
-                            .and_then(|v| Some(values.iter().any(|p| wildcard::matches(p, v))))
-                            .or(Some(false)),
-                    }
-                })
-                .unwrap_or(default);
-
-            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-            if !valid {
-                return false;
-            }
-        }
-        true
+        eval_str_cond!(self, ctx, |p, y| wildcard::matches(p, y))
     }
 }
 
@@ -442,40 +378,7 @@ impl_str_cond!(StringNotLike);
 
 impl Eval for StringNotLike {
     fn evaluate(&self, ctx: &Context) -> bool {
-        let default = match self.modifier {
-            Some(EvalModifier::IfExists) => true,
-            _ => false,
-        };
-
-        for (key, values) in self.body.0.iter() {
-            let valid = ctx
-                .get(key)
-                .and_then(|x| match self.modifier {
-                    Some(EvalModifier::ForAllValues) => {
-                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                        Some(!intersects(values, ctx_values.as_slice(), |p, y| {
-                            wildcard::matches(p, y)
-                        }))
-                    }
-                    Some(EvalModifier::ForAnyValue) => {
-                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                        Some(for_any_match(values, ctx_values.as_slice(), |p, y| {
-                            !wildcard::matches(p, y)
-                        }))
-                    }
-                    _ => x
-                        .as_str()
-                        .and_then(|v| Some(!values.iter().any(|p| wildcard::matches(p, v))))
-                        .or(Some(false)),
-                })
-                .unwrap_or(default);
-
-            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-            if !valid {
-                return false;
-            }
-        }
-        true
+        eval_str_not_cond!(self, ctx, |p, y| wildcard::matches(p, y))
     }
 }
 
@@ -740,7 +643,7 @@ mod tests {
         ctx.insert("k1", "v1");
         assert!(!cond.evaluate(&ctx));
 
-        // multiple not allowed
+        // multiple
         let mut cond = StringNotEquals::new("k1", "v1");
         cond.add("k1", "v2");
         assert!(!cond.evaluate(&ctx));
