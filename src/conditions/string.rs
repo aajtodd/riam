@@ -19,6 +19,15 @@ macro_rules! impl_str_cond {
                 }
             }
 
+            // NOTE: This isn't exactly the most friendly interface but then again I would expect
+            // the most common use case is serialization/deserialization of policies (and
+            // conditions) via JSON/YAML/etc rather than direct instantiation and usage.
+            // If that turns out to be a bad assumption then we probably want to support an
+            // interface that allows something like:
+            // StringEquals::new("k1", ["v1", "v2", ...]) vs StringEquals::new("k1", "v1") and then
+            // have to add values[1,N] manually via add().
+            // Ditto for `with_modifier()` since once set you can't unset it (via the public API anyway)
+
             // FIXME - the generated documentation (and doctest) will use the same example/type
             // regardless of the type passed to the macro
             /// Add additional key/value pairs. If the key already exists the
@@ -84,6 +93,7 @@ impl_str_cond!(StringEquals);
 fn is_subset<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
 where
     F: Fn(&T, &T) -> bool,
+    T: ::std::fmt::Debug,
 {
     'outer: for ctxv in ctx_values.iter() {
         // every value in the context has to be a member of the condition values
@@ -97,6 +107,22 @@ where
         return false;
     }
     true
+}
+
+// test whether there is an intersection between the context values and the condition values
+fn intersects<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
+where
+    F: Fn(&T, &T) -> bool,
+    T: ::std::fmt::Debug,
+{
+    for ctxv in ctx_values.iter() {
+        for condv in cond_values.iter() {
+            if cmp(condv, ctxv) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 // Test whether any of the context values match at least one of the condition values
@@ -125,58 +151,6 @@ fn serde_json_value_to_vec(v: serde_json::Value) -> Result<Vec<String>, serde_js
     Ok(seq)
 }
 
-// fn eval_str_cond<C>(
-//     body: &condition::Body<String>,
-//     modifier: Option<EvalModifier>,
-//     ctx: &Context,
-//     cmp: C,
-// ) -> bool
-// where
-//     C: Fn(&str, &str) -> bool,
-// {
-//     let default = match modifier {
-//         Some(EvalModifier::IfExists) => true,
-//         _ => false,
-//     };
-//
-//     for (key, values) in body.0.iter() {
-//         let valid = ctx
-//             .get(key)
-//             .and_then(|x| {
-//                 match modifier {
-//                     Some(EvalModifier::ForAllValues) => {
-//                         // all the incoming request context values for the key need to be a subset
-//                         // of the condition values
-//                         let ctx_values = serde_json_value_to_vec(x.clone())
-//                             .ok()
-//                             .unwrap_or_else(Vec::new);
-//                         Some(is_subset(values, ctx_values.as_slice(), cmp))
-//                     }
-//                     Some(EvalModifier::ForAnyValue) => {
-//                         // at least one of the context values has to match a condition value
-//                         let ctx_values = serde_json_value_to_vec(x.clone())
-//                             .ok()
-//                             .unwrap_or_else(Vec::new);
-//                         Some(for_any_match(values, ctx_values.as_slice(), cmp))
-//                     }
-//                     // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
-//                     // context is expected to be scalar. If it is a sequence the conditions
-//                     // should be using set modifiers
-//                     _ => x
-//                         .as_str()
-//                         .and_then(|v| Some(values.iter().any(|s| cmp(s, v)))),
-//                 }
-//             })
-//             .unwrap_or(default);
-//
-//         // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
-//         if !valid {
-//             return false;
-//         }
-//     }
-//     true
-// }
-
 impl Eval for StringEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
         let default = match self.modifier {
@@ -203,7 +177,14 @@ impl Eval for StringEquals {
                         // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
                         // context is expected to be scalar. If it is a sequence the conditions
                         // should be using set modifiers
-                        _ => x.as_str().and_then(|v| Some(values.iter().any(|s| s == v))),
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(values.iter().any(|s| s == v)))
+                            // it is important that if as_str() returns None that we don't use the
+                            // default. It should be false no matter what if the conversion fails
+                            // as we are expecting a string here AND the key did exist. This mostly
+                            // affects IfExists where the default is true
+                            .or(Some(false)),
                     }
                 })
                 .unwrap_or(default);
@@ -231,13 +212,39 @@ impl_str_cond!(StringNotEquals);
 
 impl Eval for StringNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
+        let default = match self.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
         for (key, values) in self.body.0.iter() {
             let valid = ctx
                 .get(key)
-                .and_then(|x| x.as_str())
-                .and_then(|x| Some(!values.iter().any(|s| s == x)))
-                .unwrap_or(false);
+                .and_then(|x| {
+                    match self.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to NOT be a subset
+                            // of the condition values
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(!intersects(values, ctx_values.as_slice(), |x, y| x == y))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to NOT match a condition value
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| x != y))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(!values.iter().any(|s| s == v)))
+                            .or(Some(false)),
+                    }
+                })
+                .unwrap_or(default);
 
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
             if !valid {
                 return false;
             }
@@ -260,14 +267,43 @@ impl_str_cond!(StringEqualsIgnoreCase);
 
 impl Eval for StringEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
+        let default = match self.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
         for (key, values) in self.body.0.iter() {
             let valid = ctx
                 .get(key)
-                .and_then(|x| x.as_str())
-                .and_then(|x| Some(x.to_lowercase()))
-                .and_then(|x| Some(values.iter().map(|v| v.to_lowercase()).any(|v| v == x)))
-                .unwrap_or(false);
+                .and_then(|x| {
+                    match self.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to NOT be a subset
+                            // of the condition values
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(is_subset(values, ctx_values.as_slice(), |x, y| {
+                                x.to_lowercase() == y.to_lowercase()
+                            }))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to NOT match a condition value
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| {
+                                x.to_lowercase() == y.to_lowercase()
+                            }))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(values.iter().any(|s| s.to_lowercase() == v.to_lowercase())))
+                            .or(Some(false)),
+                    }
+                })
+                .unwrap_or(default);
 
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
             if !valid {
                 return false;
             }
@@ -290,14 +326,43 @@ impl_str_cond!(StringNotEqualsIgnoreCase);
 
 impl Eval for StringNotEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
+        let default = match self.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
         for (key, values) in self.body.0.iter() {
             let valid = ctx
                 .get(key)
-                .and_then(|x| x.as_str())
-                .and_then(|x| Some(x.to_lowercase()))
-                .and_then(|x| Some(values.iter().map(|v| v.to_lowercase()).all(|v| v != x)))
-                .unwrap_or(false);
+                .and_then(|x| {
+                    match self.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to NOT be a subset
+                            // of the condition values
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(!intersects(values, ctx_values.as_slice(), |x, y| {
+                                x.to_lowercase() == y.to_lowercase()
+                            }))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to NOT match a condition value
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| {
+                                x.to_lowercase() != y.to_lowercase()
+                            }))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(!values.iter().any(|s| s.to_lowercase() == v.to_lowercase())))
+                            .or(Some(false)),
+                    }
+                })
+                .unwrap_or(default);
 
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
             if !valid {
                 return false;
             }
@@ -320,13 +385,41 @@ impl_str_cond!(StringLike);
 
 impl Eval for StringLike {
     fn evaluate(&self, ctx: &Context) -> bool {
+        let default = match self.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
         for (key, values) in self.body.0.iter() {
             let valid = ctx
                 .get(key)
-                .and_then(|x| x.as_str())
-                .and_then(|x| Some(values.iter().any(|p| wildcard::matches(p, x))))
-                .unwrap_or(false);
+                .and_then(|x| {
+                    match self.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to be a subset
+                            // of the condition values
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(is_subset(values, ctx_values.as_slice(), |p, y| wildcard::matches(p, y)))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to match a condition value
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(for_any_match(values, ctx_values.as_slice(), |p, y| {
+                                wildcard::matches(p, y)
+                            }))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => x
+                            .as_str()
+                            .and_then(|v| Some(values.iter().any(|p| wildcard::matches(p, v))))
+                            .or(Some(false)),
+                    }
+                })
+                .unwrap_or(default);
 
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
             if !valid {
                 return false;
             }
@@ -349,13 +442,35 @@ impl_str_cond!(StringNotLike);
 
 impl Eval for StringNotLike {
     fn evaluate(&self, ctx: &Context) -> bool {
+        let default = match self.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
         for (key, values) in self.body.0.iter() {
             let valid = ctx
                 .get(key)
-                .and_then(|x| x.as_str())
-                .and_then(|x| Some(values.iter().all(|p| !wildcard::matches(p, x))))
-                .unwrap_or(false);
+                .and_then(|x| match self.modifier {
+                    Some(EvalModifier::ForAllValues) => {
+                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                        Some(!intersects(values, ctx_values.as_slice(), |p, y| {
+                            wildcard::matches(p, y)
+                        }))
+                    }
+                    Some(EvalModifier::ForAnyValue) => {
+                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                        Some(for_any_match(values, ctx_values.as_slice(), |p, y| {
+                            !wildcard::matches(p, y)
+                        }))
+                    }
+                    _ => x
+                        .as_str()
+                        .and_then(|v| Some(!values.iter().any(|p| wildcard::matches(p, v))))
+                        .or(Some(false)),
+                })
+                .unwrap_or(default);
 
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
             if !valid {
                 return false;
             }
@@ -368,6 +483,7 @@ impl Eval for StringNotLike {
 mod tests {
     use super::super::*;
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_string_equals_json() {
@@ -483,6 +599,33 @@ mod tests {
         assert_eq!(expected, serialized);
     }
 
+    use serde_json::Value;
+    #[derive(Deserialize, Debug)]
+    struct EvalModifierTestCase {
+        context: HashMap<String, Value>,
+        expected: bool,
+        desc: String,
+    }
+
+    macro_rules! eval_test_cases {
+        ( $cond:ident, $test_js:ident) => {
+            let tests: Vec<EvalModifierTestCase> = serde_json::from_str($test_js).unwrap();
+            for t in tests {
+                let mut ctx = Context::new();
+                for (key, values) in t.context {
+                    ctx.insert(key.clone(), values);
+                }
+
+                let actual = $cond.evaluate(&ctx);
+                assert_eq!(
+                    t.expected, actual,
+                    "context: {:?}\ncond: {:?}\n{} ",
+                    &ctx, $cond, t.desc
+                );
+            }
+        };
+    }
+
     #[test]
     fn test_eval_string_equals() {
         // singular
@@ -503,12 +646,35 @@ mod tests {
 
         ctx.insert("k1", "v3");
         assert!(!cond.evaluate(&ctx));
+    }
 
+    #[test]
+    fn test_eval_if_exists_string_equals() {
         // if exists
         let mut cond = StringEquals::new("kx", "v1");
         cond.with_modifier(EvalModifier::IfExists);
-        assert!(cond.evaluate(&ctx), "condition should be true if the key doesn't exist");
 
+        // NOTE: Be careful of context values be singular string vs array of strings because
+        // evaluation uses as_str() when there isn't a set modifier
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "v1"}, "expected": true, "desc": "condition should be true if the key matches"},
+            {"context": {"kx": "vn"}, "expected": false, "desc": "cond should not be true if key does not match"},
+            {"context": {"kx": ["v1"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        // The last case is a special case where the incoming context is expected to be singular. A
+        // context with multiple values for a single key requires set modifiers on the condition, IfExists can't be used for this.
+        // e.g.
+        // Cond(k1: v1) == {k1: [v1]}
+        //     OR
+        // Cond(k1: [v1, v2])  == {k1: [v1, v2]}
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_equals() {
         // for all values
         // this condition should only evaluate to true if all values from the incoming context
         // for a particular key belong to the set of values in the cond set
@@ -517,26 +683,28 @@ mod tests {
         //   "k1": ["v1", "v2"]
         //
         // context:
-        //   "k1": "" // ok (empty set)
         //   "k1": "v1" // ok
         //   "k1": ["v1", "v2"] // ok
         //   "k1": "v3"  // error
+        //   "k1": ["v1", "v3"]  // error
         let mut cond = StringEquals::new("k1", "v1");
         cond.add("k1", "v2");
         cond.with_modifier(EvalModifier::ForAllValues);
 
-        let mut ctx = Context::new();
-        // FIXME - ensure the empty set is considered a subset
-        // assert!(cond.evaluate(&ctx), "the empty set should be a subset");
-        ctx.insert("k1", "v1");
-        assert!(cond.evaluate(&ctx), "set(v1) should be subset");
-        ctx.insert("k1", vec!["v1", "v2"]);
-        assert!(cond.evaluate(&ctx), "set(v1, v2) should be subset");
-        ctx.insert("k1", "v3");
-        assert!(!cond.evaluate(&ctx), "set(v3) should not be subset");
-        ctx.insert("k1", vec!["v3", "v1"]);
-        assert!(!cond.evaluate(&ctx), "set(v1, v3) should not be subset");
+        // FIXME - empty set should be considered a subset
+        let cases = r#"
+        [
+            {"context": {"k1": ["v1"]}, "expected": true, "desc": "set(v1) should be a subset"},
+            {"context": {"k1": ["v1", "v2"]}, "expected": true, "desc": "set(v1, v2) should be a subset"},
+            {"context": {"k1": ["v3"]}, "expected": false, "desc": "set(v3) should not be a subset"},
+            {"context": {"k1": ["v1", "v3"]}, "expected": false, "desc": "set(v1, v3) should not be a subset"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
 
+    #[test]
+    fn test_eval_for_any_value_string_equals() {
         // for any value
         // cond:
         //   "k1": ["v1", "v2"]
@@ -546,16 +714,19 @@ mod tests {
         //   "k1": "v1" // ok
         //   "k1": ["v1", "v3"] // ok
         //   "k1": "v3"  // error
+        //   "k1": ["v3", "v4"]  // error
+        let mut cond = StringEquals::new("k1", "v1");
         cond.with_modifier(EvalModifier::ForAnyValue);
-        let mut ctx = Context::new();
-        // FIXME - empty set should NOT be a subset
-        // assert!(cond.evaluate(&ctx), "the empty set should NOT be a subset");
-        ctx.insert("k1", "v1");
-        assert!(cond.evaluate(&ctx), "set(v1) should be subset");
-        ctx.insert("k1", vec!["v1", "v2"]);
-        assert!(cond.evaluate(&ctx), "set(v1, v2) should be subset");
-        // FIXME - finish off test case then figure out how to commonize it (or split into own cases)
-        // FIXME - commonize the implementation and add tests for all of the other string condition types
+        // FIXME - empty set should be considered a subset
+        let cases = r#"
+        [
+            {"context": {"k1": ["v1"]}, "expected": true, "desc": "set(v1) should intersect"},
+            {"context": {"k1": ["v1", "v3"]}, "expected": true, "desc": "set(v1, v3) should intersect"},
+            {"context": {"k1": ["v3"]}, "expected": false, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["v3", "v4"]}, "expected": false, "desc": "set(v3, v4) should be disjoint"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
     }
 
     #[test]
@@ -576,6 +747,84 @@ mod tests {
 
         ctx.insert("k1", "v3");
         assert!(cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_eval_if_exists_string_not_equals() {
+        // if exists
+        let mut cond = StringNotEquals::new("kx", "v1");
+        cond.with_modifier(EvalModifier::IfExists);
+
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "v1"}, "expected": false, "desc": "condition should be false if the key matches"},
+            {"context": {"kx": "vn"}, "expected": true, "desc": "cond should be true if key does not match"},
+            {"context": {"kx": ["vn"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_not_equals() {
+        // for all values
+        // this condition should only evaluate to true if all values from the incoming context
+        // for a particular key do not belong to the set of values in the cond set
+        // i.e. the set(context[key]) is not a subset of set(cond[key])
+        // cond:
+        //   "k1": ["v1", "v2"]
+        //
+        // context:
+        //   "k1": "" // ok (empty set)
+        //   "k1": "v3" // ok
+        //   "k1": ["v3", "v4"] // ok
+        //   "k1": "v1"  // error
+        //   "k1": ["v1", "v2"]  // error
+        //   "k1": ["v3", "v2"]  // error
+        let mut cond = StringNotEquals::new("k1", "v1");
+        cond.add("k1", "v2");
+        cond.with_modifier(EvalModifier::ForAllValues);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["v3"]}, "expected": true, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["v3", "v4"]}, "expected": true, "desc": "set(v3, v4) should be disjoint"},
+            {"context": {"k1": "v1"}, "expected": false, "desc": "set(v1) should intersect"},
+            {"context": {"k1": ["v1", "v2"]}, "expected": false, "desc": "set(v1, v2) should intersect"},
+            {"context": {"k1": ["v3", "v2"]}, "expected": false, "desc": "set(v3, v2) should intersect"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_any_value_string_not_equals() {
+        // for any value
+        // cond:
+        //   "k1": ["v1", "v2"]
+        //
+        // context:
+        //   "k1": "" // error - empty set doesn't match
+        //   "k1": "v3" // ok
+        //   "k1": ["v1", "v3"] // ok
+        //   "k1": "v1"  // ok (v1 doesn't match cond value v2)
+        let mut cond = StringNotEquals::new("k1", "v1");
+        cond.add("k1", "v2");
+        cond.with_modifier(EvalModifier::ForAnyValue);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["v3"]}, "expected": true, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["v1", "v3"]}, "expected": true, "desc": "v3 should not match v1/v2"},
+            {"context": {"k1": "v1"}, "expected": true, "desc": "v1 should not match v2"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+
+        // the last two cases are odd, since the cond specifies two possible values, any value
+        // will work because the incoming value will ultimately not match one of the cond values
+        // In other words don't use it like this...
     }
 
     #[test]
@@ -601,6 +850,55 @@ mod tests {
     }
 
     #[test]
+    fn test_eval_if_exists_string_equals_ignore_case() {
+        // if exists
+        let mut cond = StringEqualsIgnoreCase::new("kx", "VaLue1");
+        cond.with_modifier(EvalModifier::IfExists);
+
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "vALue1"}, "expected": true, "desc": "condition should be true if the key matches"},
+            {"context": {"kx": "value2"}, "expected": false, "desc": "cond should not be true if key does not match"},
+            {"context": {"kx": ["vALue1"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_equals_ignore_case() {
+        let mut cond = StringEqualsIgnoreCase::new("k1", "VaLue1");
+        cond.add("k1", "VALue2");
+        cond.with_modifier(EvalModifier::ForAllValues);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["VALUE1"]}, "expected": true, "desc": "set(VALUE1) should be a subset"},
+            {"context": {"k1": ["value1", "VALUE2"]}, "expected": true, "desc": "set(v1, v2) should be a subset"},
+            {"context": {"k1": ["v3"]}, "expected": false, "desc": "set(v3) should not be a subset"},
+            {"context": {"k1": ["vALue1", "v3"]}, "expected": false, "desc": "set(v1, v3) should not be a subset"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_any_value_string_equals_ignore_case() {
+        let mut cond = StringEqualsIgnoreCase::new("k1", "VaLue1");
+        cond.with_modifier(EvalModifier::ForAnyValue);
+        let cases = r#"
+        [
+            {"context": {"k1": ["value1"]}, "expected": true, "desc": "set(v1) should intersect"},
+            {"context": {"k1": ["VALue1", "v3"]}, "expected": true, "desc": "set(v1, v3) should intersect"},
+            {"context": {"k1": ["v3"]}, "expected": false, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["v3", "v4"]}, "expected": false, "desc": "set(v3, v4) should be disjoint"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
     fn test_eval_string_not_equals_ignore_case() {
         // singular
         let cond = StringNotEqualsIgnoreCase::new("k1", "value1");
@@ -620,6 +918,55 @@ mod tests {
 
         ctx.insert("k1", "VaLue3");
         assert!(cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_eval_if_exists_string_not_equals_ignore_case() {
+        let mut cond = StringNotEqualsIgnoreCase::new("kx", "VaLue1");
+        cond.with_modifier(EvalModifier::IfExists);
+
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "vALue2"}, "expected": true, "desc": "condition should be true if the key does not match"},
+            {"context": {"kx": "value1"}, "expected": false, "desc": "cond should not be true if key matches"},
+            {"context": {"kx": ["vALue2"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_not_equals_ignore_case() {
+        let mut cond = StringNotEqualsIgnoreCase::new("k1", "VaLue1");
+        cond.add("k1", "VALue2");
+        cond.with_modifier(EvalModifier::ForAllValues);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["VALUE1"]}, "expected": false, "desc": "set(VALUE1) intersects"},
+            {"context": {"k1": ["value1", "VALUE2"]}, "expected": false, "desc": "set(v1, v2) intersects"},
+            {"context": {"k1": ["v3"]}, "expected": true, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["vALue3", "v4"]}, "expected": true, "desc": "set(v3, v4) should be disjoint"},
+            {"context": {"k1": ["v3", "vALuE2"]}, "expected": false, "desc": "set(v3, vALuE2) should intersect"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_any_value_string_not_equals_ignore_case() {
+        let mut cond = StringNotEqualsIgnoreCase::new("k1", "VaLue1");
+        cond.with_modifier(EvalModifier::ForAnyValue);
+        let cases = r#"
+        [
+            {"context": {"k1": ["value1"]}, "expected": false, "desc": "set(v1) should intersect"},
+            {"context": {"k1": ["VALue1", "v3"]}, "expected": true, "desc": "set(value1, v3), v3 should not match"},
+            {"context": {"k1": ["v3"]}, "expected": true, "desc": "set(v3) should be disjoint"},
+            {"context": {"k1": ["v3", "v4"]}, "expected": true, "desc": "set(v3, v4) should be disjoint"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
     }
 
     #[test]
@@ -645,6 +992,56 @@ mod tests {
     }
 
     #[test]
+    fn test_eval_if_exists_string_like() {
+        // if exists
+        let mut cond = StringLike::new("kx", "re*123");
+        cond.with_modifier(EvalModifier::IfExists);
+
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "resources:blog:123"}, "expected": true, "desc": "condition should be true if the key matches"},
+            {"context": {"kx": "resources:blog:456"}, "expected": false, "desc": "cond should not be true if key does not match"},
+            {"context": {"kx": ["resources:blog:123"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_like() {
+        let mut cond = StringLike::new("k1", "re*123");
+        cond.add("k1", "actions:create:*");
+        cond.with_modifier(EvalModifier::ForAllValues);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["resources:blog:123"]}, "expected": true, "desc": "set(resources:blog:123) should be a subset"},
+            {"context": {"k1": ["resources:account:123", "actions:create:account"]}, "expected": true, "desc": "values should be a subset"},
+            {"context": {"k1": ["resources:blog:125"]}, "expected": false, "desc": "values should not be a subset"},
+            {"context": {"k1": ["resources:blog:123", "actions:delete:123"]}, "expected": false, "desc": "values should not be a subset"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_any_value_string_like() {
+        let mut cond = StringLike::new("k1", "re*123");
+        cond.add("k1", "actions:create:*");
+        cond.with_modifier(EvalModifier::ForAnyValue);
+        let cases = r#"
+        [
+            {"context": {"k1": ["resources:blog:123"]}, "expected": true, "desc": "set(resources:blog:123) should intersect"},
+            {"context": {"k1": ["resources:account:456", "actions:create:account"]}, "expected": true, "desc": "values should intersect"},
+            {"context": {"k1": ["resources:blog:125"]}, "expected": false, "desc": "values should not intersect"},
+            {"context": {"k1": ["resources:blog:456", "actions:delete:123"]}, "expected": false, "desc": "values should not intersect"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
     fn test_eval_string_not_like() {
         // singular
         let cond = StringNotLike::new("k1", "re*123");
@@ -664,6 +1061,55 @@ mod tests {
 
         ctx.insert("k1", "resources:blog:789");
         assert!(cond.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_eval_if_exists_string_not_like() {
+        // if exists
+        let mut cond = StringNotLike::new("kx", "re*123");
+        cond.with_modifier(EvalModifier::IfExists);
+
+        let cases = r#"
+        [
+            {"context": {}, "expected": true, "desc": "condition should be true if the key doesn't exist"},
+            {"context": {"kx": "resources:blog:123"}, "expected": false, "desc": "condition should be false if the key matches"},
+            {"context": {"kx": "resources:blog:456"}, "expected": true, "desc": "cond should be true if key does not match"},
+            {"context": {"kx": ["resources:blog:456"]}, "expected": false, "desc": "special case, cond requires set modifier for proper evaluation"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_all_values_string_not_like() {
+        let mut cond = StringNotLike::new("k1", "re*123");
+        cond.add("k1", "actions:create:*");
+        cond.with_modifier(EvalModifier::ForAllValues);
+
+        let cases = r#"
+        [
+            {"context": {"k1": ["resources:blog:123"]}, "expected": false, "desc": "set(resources:blog:123) should intersect"},
+            {"context": {"k1": ["resources:account:456", "actions:delete:account"]}, "expected": true, "desc": "values should not intersect"},
+            {"context": {"k1": ["resources:blog:125"]}, "expected": true, "desc": "values should not intersect"},
+            {"context": {"k1": ["resources:blog:456", "actions:create:account"]}, "expected": false, "desc": "values should intersect"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
+    }
+
+    #[test]
+    fn test_eval_for_any_value_string_not_like() {
+        let mut cond = StringNotLike::new("k1", "re*123");
+        cond.with_modifier(EvalModifier::ForAnyValue);
+        let cases = r#"
+        [
+            {"context": {"k1": ["resources:blog:123"]}, "expected": false, "desc": "set(resources:blog:123) should intersect"},
+            {"context": {"k1": ["resources:account:456", "actions:create:account"]}, "expected": true, "desc": "values should not intersect"},
+            {"context": {"k1": ["resources:blog:125"]}, "expected": true, "desc": "values should not intersect"},
+            {"context": {"k1": ["resources:blog:123", "actions:delete:123"]}, "expected": true, "desc": "action should not match"}
+        ]
+        "#;
+        eval_test_cases!(cond, cases);
     }
 
     #[test]
