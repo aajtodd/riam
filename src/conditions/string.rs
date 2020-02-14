@@ -77,18 +77,6 @@ macro_rules! impl_str_cond {
     };
 }
 
-/// Exact matching, case sensitive
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct StringEquals {
-    #[serde(skip)]
-    modifier: Option<EvalModifier>,
-
-    #[serde(flatten)]
-    body: condition::Body<String>,
-}
-
-impl_str_cond!(StringEquals);
-
 // Test whether the context values are a subset of the condition values
 fn is_subset<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
 where
@@ -150,6 +138,18 @@ fn serde_json_value_to_vec(v: serde_json::Value) -> Result<Vec<String>, serde_js
     };
     Ok(seq)
 }
+
+/// Exact matching, case sensitive
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct StringEquals {
+    #[serde(skip)]
+    modifier: Option<EvalModifier>,
+
+    #[serde(flatten)]
+    body: condition::Body<String>,
+}
+
+impl_str_cond!(StringEquals);
 
 impl Eval for StringEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
