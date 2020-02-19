@@ -64,11 +64,13 @@
 //!
 //! ```
 
+mod boolean;
 mod condition;
 mod string;
 
 pub use condition::{Condition, Eval};
 pub use string::{
-    StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase,
-    StringNotLike,
+    StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
+
+pub use boolean::Bool;

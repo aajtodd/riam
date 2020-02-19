@@ -28,6 +28,7 @@ macro_rules! impl_str_cond {
             // have to add values[1,N] manually via add().
             // Ditto for `with_modifier()` since once set you can't unset it (via the public API anyway)
 
+            // TODO - maybe rename to push() to match the intended effect
             // FIXME - the generated documentation (and doctest) will use the same example/type
             // regardless of the type passed to the macro
             /// Add additional key/value pairs. If the key already exists the
@@ -59,7 +60,7 @@ macro_rules! impl_str_cond {
                 match self.modifier {
                     Some(EvalModifier::ForAllValues) => concat!("ForAllValues:", $sname),
                     Some(EvalModifier::ForAnyValue) => concat!("ForAnyValue:", $sname),
-                    Some(EvalModifier::IfExists) => concat!($sname, ":IfExists"),
+                    Some(EvalModifier::IfExists) => concat!("IfExists:", $sname),
                     None => $sname,
                 }
             }
@@ -1028,7 +1029,7 @@ mod tests {
         assert_eq!(cond.serialized_name(), "ForAllValues:StringEquals");
 
         cond.with_modifier(EvalModifier::IfExists);
-        assert_eq!(cond.serialized_name(), "StringEquals:IfExists");
+        assert_eq!(cond.serialized_name(), "IfExists:StringEquals");
     }
 
     #[test]

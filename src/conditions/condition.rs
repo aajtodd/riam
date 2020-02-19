@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::iter::Iterator;
 
+use super::boolean::Bool;
 use super::string::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
@@ -67,6 +68,7 @@ impl<T> Body<T> {
         body
     }
 
+    // TODO - maybe rename to push() and have an insert() method that actually does an inplace update or inserts new if it didn't exist
     /// Insert a new key/value pair into this condition body. If the key already exists, the new
     /// value is appended to the list of acceptable values for that key
     pub fn insert(&mut self, k: String, v: T) {
@@ -134,6 +136,7 @@ pub enum Condition {
     StringNotEqualsIgnoreCase,
     StringLike,
     StringNotLike,
+    Bool,
 }
 
 // The only way to get modifiers on the serialized format of a policy condition to match the syntax
@@ -162,6 +165,7 @@ impl Serialize for Condition {
             Condition::StringNotLike(ref c) => {
                 serializer.serialize_newtype_variant("Condition", 5, c.serialized_name(), c)
             }
+            Condition::Bool(ref c) => serializer.serialize_newtype_variant("Condition", 6, c.serialized_name(), c),
         }
     }
 }
@@ -234,6 +238,13 @@ impl<'de> Visitor<'de> for ConditionVisitor {
             "IfExists:StringNotLike" => de_cond_wmod!(StringNotLike, map, IfExists),
             "ForAnyValue:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAnyValue),
             "ForAllValues:StringNotLike" => de_cond_wmod!(StringNotLike, map, ForAllValues),
+
+            "Bool" => de_cond!(Bool, map),
+            "IfExists:Bool" => {
+                let mut c = map.next_value::<Bool>()?;
+                c.set_if_exists();
+                Ok(Condition::Bool(c))
+            }
 
             _ => {
                 let msg = format!("unrecognized condition '{}'", key);
