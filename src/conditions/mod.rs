@@ -66,11 +66,15 @@
 
 mod boolean;
 mod condition;
+mod numeric;
 mod string;
 
+pub use boolean::Bool;
 pub use condition::{Condition, Eval};
+pub use numeric::{
+    NumericEquals, NumericGreaterThan, NumericGreaterThanEquals, NumericLessThan, NumericLessThanEquals,
+    NumericNotEquals,
+};
 pub use string::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
-
-pub use boolean::Bool;

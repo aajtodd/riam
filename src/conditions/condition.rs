@@ -8,7 +8,11 @@ use std::fmt;
 use std::iter::Iterator;
 
 use super::boolean::Bool;
-use super::string::{
+use super::numeric::{
+    NumericEquals, NumericGreaterThan, NumericGreaterThanEquals, NumericLessThan, NumericLessThanEquals,
+    NumericNotEquals,
+};
+use super::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
 
@@ -137,6 +141,12 @@ pub enum Condition {
     StringLike,
     StringNotLike,
     Bool,
+    NumericEquals,
+    NumericNotEquals,
+    NumericLessThan,
+    NumericLessThanEquals,
+    NumericGreaterThan,
+    NumericGreaterThanEquals,
 }
 
 // The only way to get modifiers on the serialized format of a policy condition to match the syntax
@@ -146,26 +156,25 @@ impl Serialize for Condition {
     where
         S: Serializer,
     {
+        macro_rules! ser_cond {
+            ( $s:ident, $cond:ident, $idx:expr ) => {{
+                $s.serialize_newtype_variant("Condition", $idx, $cond.serialized_name(), $cond)
+            }};
+        }
         match *self {
-            Condition::StringEquals(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 0, c.serialized_name(), c)
-            }
-            Condition::StringNotEquals(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 1, c.serialized_name(), c)
-            }
-            Condition::StringEqualsIgnoreCase(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 2, c.serialized_name(), c)
-            }
-            Condition::StringNotEqualsIgnoreCase(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 3, c.serialized_name(), c)
-            }
-            Condition::StringLike(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 4, c.serialized_name(), c)
-            }
-            Condition::StringNotLike(ref c) => {
-                serializer.serialize_newtype_variant("Condition", 5, c.serialized_name(), c)
-            }
-            Condition::Bool(ref c) => serializer.serialize_newtype_variant("Condition", 6, c.serialized_name(), c),
+            Condition::StringEquals(ref c) => ser_cond!(serializer, c, 0),
+            Condition::StringNotEquals(ref c) => ser_cond!(serializer, c, 1),
+            Condition::StringEqualsIgnoreCase(ref c) => ser_cond!(serializer, c, 2),
+            Condition::StringNotEqualsIgnoreCase(ref c) => ser_cond!(serializer, c, 3),
+            Condition::StringLike(ref c) => ser_cond!(serializer, c, 4),
+            Condition::StringNotLike(ref c) => ser_cond!(serializer, c, 5),
+            Condition::Bool(ref c) => ser_cond!(serializer, c, 6),
+            Condition::NumericEquals(ref c) => ser_cond!(serializer, c, 7),
+            Condition::NumericNotEquals(ref c) => ser_cond!(serializer, c, 8),
+            Condition::NumericLessThan(ref c) => ser_cond!(serializer, c, 9),
+            Condition::NumericLessThanEquals(ref c) => ser_cond!(serializer, c, 10),
+            Condition::NumericGreaterThan(ref c) => ser_cond!(serializer, c, 11),
+            Condition::NumericGreaterThanEquals(ref c) => ser_cond!(serializer, c, 12),
         }
     }
 }
@@ -245,6 +254,36 @@ impl<'de> Visitor<'de> for ConditionVisitor {
                 c.set_if_exists();
                 Ok(Condition::Bool(c))
             }
+
+            "NumericEquals" => de_cond!(NumericEquals, map),
+            "IfExists:NumericEquals" => de_cond_wmod!(NumericEquals, map, IfExists),
+            "ForAnyValue:NumericEquals" => de_cond_wmod!(NumericEquals, map, ForAnyValue),
+            "ForAllValues:NumericEquals" => de_cond_wmod!(NumericEquals, map, ForAllValues),
+
+            "NumericNotEquals" => de_cond!(NumericNotEquals, map),
+            "IfExists:NumericNotEquals" => de_cond_wmod!(NumericNotEquals, map, IfExists),
+            "ForAnyValue:NumericNotEquals" => de_cond_wmod!(NumericNotEquals, map, ForAnyValue),
+            "ForAllValues:NumericNotEquals" => de_cond_wmod!(NumericNotEquals, map, ForAllValues),
+
+            "NumericLessThan" => de_cond!(NumericLessThan, map),
+            "IfExists:NumericLessThan" => de_cond_wmod!(NumericLessThan, map, IfExists),
+            "ForAnyValue:NumericLessThan" => de_cond_wmod!(NumericLessThan, map, ForAnyValue),
+            "ForAllValues:NumericLessThan" => de_cond_wmod!(NumericLessThan, map, ForAllValues),
+
+            "NumericLessThanEquals" => de_cond!(NumericLessThanEquals, map),
+            "IfExists:NumericLessThanEquals" => de_cond_wmod!(NumericLessThanEquals, map, IfExists),
+            "ForAnyValue:NumericLessThanEquals" => de_cond_wmod!(NumericLessThanEquals, map, ForAnyValue),
+            "ForAllValues:NumericLessThanEquals" => de_cond_wmod!(NumericLessThanEquals, map, ForAllValues),
+
+            "NumericGreaterThan" => de_cond!(NumericGreaterThan, map),
+            "IfExists:NumericGreaterThan" => de_cond_wmod!(NumericGreaterThan, map, IfExists),
+            "ForAnyValue:NumericGreaterThan" => de_cond_wmod!(NumericGreaterThan, map, ForAnyValue),
+            "ForAllValues:NumericGreaterThan" => de_cond_wmod!(NumericGreaterThan, map, ForAllValues),
+
+            "NumericGreaterThanEquals" => de_cond!(NumericGreaterThanEquals, map),
+            "IfExists:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, IfExists),
+            "ForAnyValue:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, ForAnyValue),
+            "ForAllValues:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, ForAllValues),
 
             _ => {
                 let msg = format!("unrecognized condition '{}'", key);
