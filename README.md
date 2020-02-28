@@ -29,7 +29,7 @@ In the future a higher level service will be built on top of this library to pro
 
 # Concepts
 
-Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. While there are notable differences the AWS docuementation will be far more complete around the overally subject. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL](https://en.wikipedia.org/wiki/Access-control_list)). 
+Policies in `riam` are very similar to [AWS IAM polcies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html). If you are unfamiliar with them I would look at the provided documentation link to get an idea of what they are and how they work. While there are notable differences the AWS documentation will be far more complete around the overall subject. IAM (like) policies are an alternative to Role Based Access Control ([RBAC](https://en.wikipedia.org/wiki/Role-based_access_control)) or Access Control Lists ([ACL](https://en.wikipedia.org/wiki/Access-control_list)). 
 
 Notable differences from AWS IAM policies:
 * riam policies only offer "identity" based policies in AWS terms. In riam's case an identity is abstract though and can represent whatever you want (user, group, machine/service, etc)
@@ -181,6 +181,30 @@ The following request would be allowed (assuming the policy is attached to the p
 }
 ```
 
+### Bool Conditions
+
+Boolean conditions let you construct Condition elements that restrict access based on comparing a key to "true" or "false." 
+
+| Condition Operator       | Description
+|--------------------------|-----------------------------------|
+| Bool                     | Boolean matching
+
+
+### Numeric Conditions
+
+Numeric condition operators let you construct Condition elements that restrict access based on comparing a key to an integer or decimal value. 
+
+
+| Condition Operator       | Description
+|--------------------------|-----------------------------------|
+| NumericEquals            | Exact matching
+| NumericNotEquals         | Negated matching
+| NumericLessThan          | Less than ("<") matching
+| NumericLessThanEquals    | Less than or equal ("<=") matching
+| NumericGreaterThan       | Greater than (">") matching
+| NumericGreaterThanEquals | Greater than or equal (">=") matching
+
+NOTE: It is recommended that numeric conditions involving decimals use a fixed point string representation when writing policies. The serialized format (e.g. JSON) supports floating point numbers and the implementation supports parsing floats but it is more precise to use a string to represent fixed point decimal numbers. Doing so will ensure that no relative errors occur in the conversion from JSON -> float -> Decimal. Integers are always fine to use either with or without quotes.
 
 
 # Guidelines
