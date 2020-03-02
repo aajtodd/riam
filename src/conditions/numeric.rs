@@ -1,5 +1,5 @@
 /// Numeric condition operators let you construct Condition elements that restrict access based on comparing a key to an integer or decimal value.
-use super::condition::{Body, EvalModifier};
+use super::condition::{Body, EvalModifier, ScalarOrSeq};
 use super::Eval;
 use crate::Context;
 use rust_decimal::prelude::FromPrimitive;
@@ -7,8 +7,11 @@ use rust_decimal::Decimal;
 use serde::de::Unexpected;
 use serde::{Deserialize, Serialize};
 use std::cmp;
+use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
+
+use super::util;
 
 // TODO - move this to common and implement string using it.
 // TODO - rename body::insert to body::push. Add an insert() method that does a replace inplace
@@ -192,6 +195,15 @@ impl Into<Decimal> for Num {
     }
 }
 
+impl TryFrom<serde_json::Value> for Num {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let n: Num = serde_json::from_value(value)?;
+        Ok(n)
+    }
+}
+
 // copies are a bit heavy handed but it drastically simplifies the implementation. Leverage
 // decimal implementation of PartialEq/Eq and PartialOrd/Ord
 impl cmp::PartialEq for Num {
@@ -218,6 +230,81 @@ impl cmp::Ord for Num {
     }
 }
 
+// convert a JSON value to a vec handling both scalar and seq types (e.g. "v1" and ["v1", "v2"])
+fn serde_json_value_to_vec(v: serde_json::Value) -> Result<Vec<Num>, serde_json::Error> {
+    let x: ScalarOrSeq<Num> = serde_json::from_value(v)?;
+    let seq = match x {
+        ScalarOrSeq::Scalar(s) => vec![s],
+        ScalarOrSeq::Seq(seq) => seq,
+    };
+    Ok(seq)
+}
+
+macro_rules! eval_num_cond {
+    ($cond:ident, $ctx:ident, $cmp:expr) => {{
+        // use the same comparison lambda for both forall/forany as well as the singular case
+        eval_num_cond!($cond, $ctx, $cmp, $cmp)
+    }};
+
+    // condition, context, lambda used for comparison (plural), lambda used for comparison (singular)
+    // Lambda will be passed (condv, ctxv) and should yield a boolean result.
+    //
+    // ... why the distinction you ask. Well the signatures of for_any_match, is_subset, etc do not
+    // match the signature of the singular case (e.g. &String vs &str). I'm sure there is a way around
+    // this but I haven't seen a clean way that keeps the functions generic over any type T without
+    // be more specific and specifying &str (which would fix the ambiguity and difference between
+    // the two cases). For now allow the closures to be specified independently *if needed*.
+    ($cond:ident, $ctx:ident, $cmp:expr, $scmp:expr) => {{
+        let default = match $cond.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
+        for (key, cond_values) in $cond.body.0.iter() {
+            let valid = $ctx
+                .get(key)
+                .and_then(|x| {
+                    match $cond.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            // all the incoming request context values for the key need to be a subset
+                            // of the condition values
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(util::is_subset(cond_values, ctx_values.as_slice(), $cmp))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            // at least one of the context values has to match a condition value
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(util::intersects(cond_values, ctx_values.as_slice(), $cmp))
+                        }
+                        // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
+                        // context is expected to be scalar. If it is a sequence the conditions
+                        // should be using set modifiers
+                        _ => {
+                            match Num::try_from(x.clone()) {
+                                Ok(v) => Some(cond_values.iter().any(|n| {
+                                    let result = $scmp(n, &v);
+                                    result
+                                })),
+                                // it is important that if conversion from Value -> Num fails None that we don't use the
+                                // default. It should be false no matter what if the conversion fails
+                                // as we are expecting some kind of number here AND the key did exist. This mostly
+                                // affects IfExists where the default is true
+                                Err(_) => Some(false),
+                            }
+                        }
+                    }
+                })
+                .unwrap_or(default);
+
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
+            if !valid {
+                return false;
+            }
+        }
+        true
+    }};
+}
+
 /// Exact matching
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct NumericEquals {
@@ -232,8 +319,7 @@ impl_cond_base!(NumericEquals, Num);
 
 impl Eval for NumericEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
-        // TODO - are numeric conditions really able to have multiple values??
-        unimplemented!()
+        eval_num_cond!(self, ctx, |condv, ctxv| condv == ctxv)
     }
 }
 
@@ -251,6 +337,7 @@ impl_cond_base!(NumericNotEquals, Num);
 
 impl Eval for NumericNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
+        // FIXME - implement and figure out if we can actually re-use the normal NumericEquals and invert it
         unimplemented!()
     }
 }
@@ -269,7 +356,7 @@ impl_cond_base!(NumericLessThan, Num);
 
 impl Eval for NumericLessThan {
     fn evaluate(&self, ctx: &Context) -> bool {
-        unimplemented!()
+        eval_num_cond!(self, ctx, |condv, ctxv| ctxv < condv)
     }
 }
 
@@ -287,7 +374,7 @@ impl_cond_base!(NumericLessThanEquals, Num);
 
 impl Eval for NumericLessThanEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
-        unimplemented!()
+        eval_num_cond!(self, ctx, |condv, ctxv| ctxv <= condv)
     }
 }
 
@@ -305,7 +392,7 @@ impl_cond_base!(NumericGreaterThan, Num);
 
 impl Eval for NumericGreaterThan {
     fn evaluate(&self, ctx: &Context) -> bool {
-        unimplemented!()
+        eval_num_cond!(self, ctx, |condv, ctxv| ctxv > condv)
     }
 }
 
@@ -323,7 +410,7 @@ impl_cond_base!(NumericGreaterThanEquals, Num);
 
 impl Eval for NumericGreaterThanEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
-        unimplemented!()
+        eval_num_cond!(self, ctx, |condv, ctxv| ctxv >= condv)
     }
 }
 
@@ -497,29 +584,894 @@ mod tests {
         assert_eq!(expected, actual);
     }
 
+    #[derive(Serialize, Deserialize, Debug)]
+    struct EvalTestCase {
+        // the context to evaluate
+        ctx: Context,
+        // expected value when this context is evaluated against the given test condition
+        exp: bool,
+
+        // description of this test case
+        #[serde(default)]
+        desc: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct EvalCondTest {
+        // condition to evaluate
+        cond: Condition,
+        // cases to evaluate against this single condition
+        cases: Vec<EvalTestCase>,
+    }
+
+    macro_rules! eval_test {
+        ($cases:ident) => {
+            let tests: Vec<EvalCondTest> = serde_json::from_str($cases).unwrap();
+            for (i, test) in tests.iter().enumerate() {
+                for (j, case) in test.cases.iter().enumerate() {
+                    let actual = test.cond.evaluate(&case.ctx);
+                    assert_eq!(
+                        case.exp, actual,
+                        "test {} case {} failed; cond: {:?}; ctx: {:?}; desc: {}",
+                        i, j, test.cond, case.ctx, case.desc
+                    );
+                }
+            }
+        };
+    }
+
     #[test]
     fn test_eval_numeric_equals() {
-        // integer
-        // singular
-        // let cond = NumericEquals::new("k1", 17);
-        //
-        // let mut ctx = Context::new();
-        // ctx.insert("k1", 17);
-        //
-        // assert!(cond.evaluate(&ctx));
-        //
-        // ctx.insert("k1", 5);
-        // assert!(!cond.evaluate(&ctx));
-        //
-        // // multiple
-        // let mut cond = NumericEquals::new("k1", 17);
-        // cond.push("k1", 2);
-        // ctx.insert("k1", 2);
-        // assert!(cond.evaluate(&ctx));
-        //
-        // ctx.insert("k1", 5);
-        // assert!(!cond.evaluate(&ctx));
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericEquals": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 2,
+                            "k2": -7,
+                            "k3": "2.02"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 2,
+                            "k3": "2.02"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericEquals": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "2.02"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
 
-        // TODO float/decimal
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // normal singular/multiple cond values
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "IfExists:NumericEquals": {
+                          "k1": 2,
+                          "k2": -7
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 2,
+                            "k2": -7
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k2": -7
+                        },
+                        "exp": true,
+                        "desc": "Should only evaluate if the key is present in the context"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 11,
+                            "k2": -7
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test IfExists
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAllValues:NumericEquals": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": [2, "2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": ["2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": -7
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [2, 11]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAllValues
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAnyValue:NumericEquals": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 2
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [11, 15, "2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-8, 11]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAnyValue
+        eval_test!(tests);
+    }
+
+    #[test]
+    fn test_eval_numeric_not_equals() {
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericNotEquals": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -8,
+                            "k3": "3.02"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k3": "3.02"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericNotEquals": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "2.02"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
+
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // normal singular/multiple cond values
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "IfExists:NumericNotEquals": {
+                          "k1": 2,
+                          "k2": -7
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -8
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k2": -8
+                        },
+                        "exp": true,
+                        "desc": "Should only evaluate if the key is present in the context"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 11,
+                            "k2": -7
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test IfExists
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAllValues:NumericNotEquals": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": [2, "2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": ["2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": -7
+                        },
+                        "exp": true
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "ForAllValues:NumericNotEquals": {
+                          "k1": 2
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": [2, "2.02"]
+                        },
+                        "exp": false
+                    },
+                    {
+                        "ctx": {
+                            "k1": [3, "2.02"]
+                        },
+                        "exp": true
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAllValues
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAnyValue:NumericNotEquals": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 2
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [11, 15, "2.02"]
+                        },
+                        "exp": true
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "ForAnyValue:NumericNotEquals": {
+                          "k1": 2
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 2
+                        },
+                        "exp": false
+                    },
+                    {
+                        "ctx": {
+                            "k1": [2, 15[
+                        },
+                        "exp": true
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAnyValue
+        eval_test!(tests);
+    }
+
+    #[test]
+    fn test_eval_numeric_less_than() {
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericLessThan": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k2": -8,
+                            "k3": "2.01"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k3": "2.01"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericLessThan": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "2.01"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
+
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // normal singular/multiple cond values
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "IfExists:NumericLessThan": {
+                          "k1": 2,
+                          "k2": -7
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k2": -8
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k2": -8
+                        },
+                        "exp": true,
+                        "desc": "Should only evaluate if the key is present in the context"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 2,
+                            "k2": -8
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test IfExists
+        eval_test!(tests);
+
+        // ForAllValues:NumericLessThan is effectively testing if every request set is < max(cond set)
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAllValues:NumericLessThan": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": [1, "2.01"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": ["2.01", -8]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3
+                        },
+                        "exp": false
+                    },
+                    {
+                        "ctx": {
+                            "k1": [2, "2.02"]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAllValues
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAnyValue:NumericLessThan": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "-7.1"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [11, 15, "-8.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-7, 11]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [3, 11]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAnyValue
+        eval_test!(tests);
+    }
+
+    #[test]
+    fn test_eval_numeric_less_than_equals() {
+        // most of the set operators are tested in NumericLessThan, we just need a sanity check
+        // that <= works
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericLessThanEquals": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k2": -8,
+                            "k3": "2.02"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k3": "2.01"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 1,
+                            "k2": -8,
+                            "k3": "2.03"
+                        },
+                        "exp": false
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericLessThanEquals": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "5"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
+
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        eval_test!(tests);
+    }
+
+    #[test]
+    fn test_eval_numeric_greater_than() {
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericGreaterThan": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -6,
+                            "k3": "2.03"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k3": "2.03"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -6,
+                            "k3": "2.02"
+                        },
+                        "exp": false
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericGreaterThan": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "2.03"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
+
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // normal singular/multiple cond values
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "IfExists:NumericGreaterThan": {
+                          "k1": 2,
+                          "k2": -7
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -6
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k2": -6
+                        },
+                        "exp": true,
+                        "desc": "Should only evaluate if the key is present in the context"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 2,
+                            "k2": -8
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test IfExists
+        eval_test!(tests);
+
+        // ForAllValues:NumericGreaterThan is effectively testing if every request set is > min(cond set)
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAllValues:NumericGreaterThan": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": [1, "2.02"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": -7
+                        },
+                        "exp": false
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-8, 1]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAllValues
+        eval_test!(tests);
+
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "ForAnyValue:NumericGreaterThan": {
+                          "k1": [2, -7, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "-6.9"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-8, -15, "2.03"]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-7, 11]
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": [-7, -8]
+                        },
+                        "exp": false
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // test ForAnyValue
+        eval_test!(tests);
+    }
+
+    #[test]
+    fn test_eval_numeric_greater_than_equals() {
+        // most of the set operators are tested in NumericGreaterThan, we just need a sanity check
+        // that >= works
+        let tests = r#"
+        [
+            {
+                "cond": {
+                    "NumericGreaterThanEquals": {
+                          "k1": 2,
+                          "k2": -7,
+                          "k3": "2.02"
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -7,
+                            "k3": "2.03"
+                        },
+                        "exp": true
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k3": "2.03"
+                        },
+                        "exp": false,
+                        "desc": "Missing ctx key; Cond keys are AND'd together"
+                    },
+                    {
+                        "ctx": {
+                            "k1": 3,
+                            "k2": -6,
+                            "k3": "2.02"
+                        },
+                        "exp": true
+                    }
+                ]
+            },
+            {
+                "cond": {
+                    "NumericGreaterThanEquals": {
+                          "k1": [5, "2.02"]
+                    }
+                },
+                "cases": [
+                    {
+                        "ctx": {
+                            "k1": "2.03"
+                        },
+                        "exp": true,
+                        "desc": "Multiple condition values should be OR'd together for a single incoming ctx value"
+
+                    }
+                ]
+            }
+        ]
+        "#;
+
+        // normal singular/multiple cond values
+        eval_test!(tests);
     }
 }
