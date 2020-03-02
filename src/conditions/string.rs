@@ -1,144 +1,9 @@
 use super::condition::{self, Body, EvalModifier, ScalarOrSeq};
-use super::Eval;
+use super::{util, Eval};
 use crate::wildcard;
 use crate::Context;
 use serde::{Deserialize, Serialize};
 use std::iter::Iterator;
-
-macro_rules! impl_str_cond {
-    ($x:ident, $sname:expr) => {
-        impl $x {
-            /// Create a new condition with initial key/value pair
-            pub fn new<S>(key: S, value: S) -> Self
-            where
-                S: Into<String>,
-            {
-                $x {
-                    modifier: None,
-                    body: Body::new(key.into(), value.into()),
-                }
-            }
-
-            // NOTE: This isn't exactly the most friendly interface but then again I would expect
-            // the most common use case is serialization/deserialization of policies (and
-            // conditions) via JSON/YAML/etc rather than direct instantiation and usage.
-            // If that turns out to be a bad assumption then we probably want to support an
-            // interface that allows something like:
-            // StringEquals::new("k1", ["v1", "v2", ...]) vs StringEquals::new("k1", "v1") and then
-            // have to add values[1,N] manually via add().
-            // Ditto for `with_modifier()` since once set you can't unset it (via the public API anyway)
-
-            // TODO - maybe rename to push() to match the intended effect
-            // FIXME - the generated documentation (and doctest) will use the same example/type
-            // regardless of the type passed to the macro
-            /// Add additional key/value pairs. If the key already exists the
-            /// value is appended to the list of allowed values for this key.
-            ///
-            /// # Example
-            /// NOTE: The example uses `StringEquals` however the method works the same for
-            /// all String* condition operators.
-            ///
-            /// ```
-            /// # use riam::conditions::StringEquals;
-            /// let mut cond = StringEquals::new("k1", "v1");
-            /// cond.add("k1", "v2");
-            /// // equivalent JSON:
-            /// // {"StringEquals":{"k1": ["v1", "v2"]}}
-            /// ```
-            pub fn add<'a, S>(&'a mut self, key: S, value: S) -> &'a Self
-            where
-                S: Into<String>,
-            {
-                self.body.insert(key.into(), value.into());
-                self
-            }
-
-            /// The name that should be used to serialize this condition.
-            /// Modifiers like ForAllValues, ForAnyValue, and IfExists can change
-            /// the expected serialized name.
-            pub(crate) fn serialized_name(&self) -> &'static str {
-                match self.modifier {
-                    Some(EvalModifier::ForAllValues) => concat!("ForAllValues:", $sname),
-                    Some(EvalModifier::ForAnyValue) => concat!("ForAnyValue:", $sname),
-                    Some(EvalModifier::IfExists) => concat!("IfExists:", $sname),
-                    None => $sname,
-                }
-            }
-
-            /// Modify the way this condition is evaluated. Only one modifier is set at a time,
-            /// you can't combine them.
-            pub fn with_modifier(&mut self, m: EvalModifier) {
-                self.modifier = Some(m);
-            }
-        }
-    };
-
-    ($name:tt) => {
-        impl_str_cond!($name, stringify!($name));
-    };
-}
-
-// Test whether the context values are a subset of the condition values
-fn is_subset<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
-where
-    F: Fn(&T, &T) -> bool,
-    T: ::std::fmt::Debug,
-{
-    'outer: for ctxv in ctx_values.iter() {
-        // every value in the context has to be a member of the condition values
-        for condv in cond_values.iter() {
-            if cmp(condv, ctxv) {
-                continue 'outer;
-            }
-        }
-
-        // no condv matched
-        return false;
-    }
-    true
-}
-
-// test whether there is an intersection between the context values and the condition values
-fn intersects<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
-where
-    F: Fn(&T, &T) -> bool,
-    T: ::std::fmt::Debug,
-{
-    for ctxv in ctx_values.iter() {
-        for condv in cond_values.iter() {
-            if cmp(condv, ctxv) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-// test whether all of the context values are not equal to any of the condition values, equivalent
-// to testing for the empty intersection
-fn is_disjoint<T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
-where
-    F: Fn(&T, &T) -> bool,
-    T: ::std::fmt::Debug,
-{
-    !intersects(cond_values, ctx_values, cmp)
-}
-
-// Test whether any of the context values match at least one of the condition values
-fn for_any_match<'a, T, F>(cond_values: &[T], ctx_values: &[T], cmp: F) -> bool
-where
-    F: Fn(&T, &T) -> bool,
-    T: ::std::fmt::Debug,
-{
-    for ctxv in ctx_values.iter() {
-        for condv in cond_values.iter() {
-            if cmp(condv, ctxv) {
-                return true;
-            }
-        }
-    }
-    false
-}
 
 // convert a JSON value to a vec handling both scalar and seq types (e.g. "v1" and ["v1", "v2"])
 fn serde_json_value_to_vec(v: serde_json::Value) -> Result<Vec<String>, serde_json::Error> {
@@ -177,12 +42,12 @@ macro_rules! eval_str_cond {
                             // all the incoming request context values for the key need to be a subset
                             // of the condition values
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(is_subset(values, ctx_values.as_slice(), $cmp))
+                            Some(util::is_subset(values, ctx_values.as_slice(), $cmp))
                         }
                         Some(EvalModifier::ForAnyValue) => {
                             // at least one of the context values has to match a condition value
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), $cmp))
+                            Some(util::intersects(values, ctx_values.as_slice(), $cmp))
                         }
                         // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
                         // context is expected to be scalar. If it is a sequence the conditions
@@ -232,12 +97,12 @@ macro_rules! eval_str_not_cond {
                             // all the incoming request context values for the key need to NOT
                             // match any of the condition values (i.e. they do not intersect)
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(is_disjoint(values, ctx_values.as_slice(), $cmp))
+                            Some(util::is_disjoint(values, ctx_values.as_slice(), $cmp))
                         }
                         Some(EvalModifier::ForAnyValue) => {
                             // at least one of the context values has to _not_ match a condition value (hence the inversion)
                             let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(for_any_match(values, ctx_values.as_slice(), |x, y| !($cmp(x, y))))
+                            Some(util::intersects(values, ctx_values.as_slice(), |x, y| !($cmp(x, y))))
                         }
                         // possible (cond) value's are OR'd together for evaluation (only 1 needs to pass)
                         // context is expected to be scalar. If it is a sequence the conditions
@@ -273,7 +138,7 @@ pub struct StringEquals {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringEquals);
+impl_cond_base!(StringEquals, String);
 
 impl Eval for StringEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -291,7 +156,7 @@ pub struct StringNotEquals {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringNotEquals);
+impl_cond_base!(StringNotEquals, String);
 
 impl Eval for StringNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -309,7 +174,7 @@ pub struct StringEqualsIgnoreCase {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringEqualsIgnoreCase);
+impl_cond_base!(StringEqualsIgnoreCase, String);
 
 impl Eval for StringEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -333,7 +198,7 @@ pub struct StringNotEqualsIgnoreCase {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringNotEqualsIgnoreCase);
+impl_cond_base!(StringNotEqualsIgnoreCase, String);
 
 impl Eval for StringNotEqualsIgnoreCase {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -357,7 +222,7 @@ pub struct StringLike {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringLike);
+impl_cond_base!(StringLike, String);
 
 impl Eval for StringLike {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -375,7 +240,7 @@ pub struct StringNotLike {
     body: condition::Body<String>,
 }
 
-impl_str_cond!(StringNotLike);
+impl_cond_base!(StringNotLike, String);
 
 impl Eval for StringNotLike {
     fn evaluate(&self, ctx: &Context) -> bool {
@@ -545,7 +410,7 @@ mod tests {
 
         // multiple allowed
         let mut cond = StringEquals::new("k1", "v1");
-        cond.add("k1", "v2");
+        cond.push("k1", "v2");
         assert!(cond.evaluate(&ctx));
 
         ctx.insert("k1", "v3");
@@ -592,7 +457,7 @@ mod tests {
         //   "k1": "v3"  // error
         //   "k1": ["v1", "v3"]  // error
         let mut cond = StringEquals::new("k1", "v1");
-        cond.add("k1", "v2");
+        cond.push("k1", "v2");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         // FIXME - empty set should be considered a subset
@@ -646,7 +511,7 @@ mod tests {
 
         // multiple
         let mut cond = StringNotEquals::new("k1", "v1");
-        cond.add("k1", "v2");
+        cond.push("k1", "v2");
         assert!(!cond.evaluate(&ctx));
 
         ctx.insert("k1", "v3");
@@ -687,7 +552,7 @@ mod tests {
         //   "k1": ["v1", "v2"]  // error
         //   "k1": ["v3", "v2"]  // error
         let mut cond = StringNotEquals::new("k1", "v1");
-        cond.add("k1", "v2");
+        cond.push("k1", "v2");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         let cases = r#"
@@ -714,7 +579,7 @@ mod tests {
         //   "k1": ["v1", "v3"] // ok
         //   "k1": "v1"  // ok (v1 doesn't match cond value v2)
         let mut cond = StringNotEquals::new("k1", "v1");
-        cond.add("k1", "v2");
+        cond.push("k1", "v2");
         cond.with_modifier(EvalModifier::ForAnyValue);
 
         let cases = r#"
@@ -746,7 +611,7 @@ mod tests {
 
         // multiple allowed
         let mut cond = StringEqualsIgnoreCase::new("k1", "VaLue1");
-        cond.add("k1", "ValUE2");
+        cond.push("k1", "ValUE2");
         assert!(cond.evaluate(&ctx));
 
         ctx.insert("k1", "v3");
@@ -773,7 +638,7 @@ mod tests {
     #[test]
     fn test_eval_for_all_values_string_equals_ignore_case() {
         let mut cond = StringEqualsIgnoreCase::new("k1", "VaLue1");
-        cond.add("k1", "VALue2");
+        cond.push("k1", "VALue2");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         let cases = r#"
@@ -817,7 +682,7 @@ mod tests {
 
         // multiple not allowed
         let mut cond = StringNotEqualsIgnoreCase::new("k1", "VaLue1");
-        cond.add("k1", "ValUE2");
+        cond.push("k1", "ValUE2");
         assert!(!cond.evaluate(&ctx));
 
         ctx.insert("k1", "VaLue3");
@@ -843,7 +708,7 @@ mod tests {
     #[test]
     fn test_eval_for_all_values_string_not_equals_ignore_case() {
         let mut cond = StringNotEqualsIgnoreCase::new("k1", "VaLue1");
-        cond.add("k1", "VALue2");
+        cond.push("k1", "VALue2");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         let cases = r#"
@@ -888,7 +753,7 @@ mod tests {
 
         // multiple allowed
         let mut cond = StringLike::new("k1", "resources:*:123");
-        cond.add("k1", "resources:*:456");
+        cond.push("k1", "resources:*:456");
         assert!(cond.evaluate(&ctx));
 
         ctx.insert("k1", "resources:blog:789");
@@ -915,7 +780,7 @@ mod tests {
     #[test]
     fn test_eval_for_all_values_string_like() {
         let mut cond = StringLike::new("k1", "re*123");
-        cond.add("k1", "actions:create:*");
+        cond.push("k1", "actions:create:*");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         let cases = r#"
@@ -932,7 +797,7 @@ mod tests {
     #[test]
     fn test_eval_for_any_value_string_like() {
         let mut cond = StringLike::new("k1", "re*123");
-        cond.add("k1", "actions:create:*");
+        cond.push("k1", "actions:create:*");
         cond.with_modifier(EvalModifier::ForAnyValue);
         let cases = r#"
         [
@@ -960,7 +825,7 @@ mod tests {
 
         // multiple not allowed
         let mut cond = StringNotLike::new("k1", "resources:*:123");
-        cond.add("k1", "resources:*:456");
+        cond.push("k1", "resources:*:456");
         assert!(!cond.evaluate(&ctx));
 
         ctx.insert("k1", "resources:blog:789");
@@ -987,7 +852,7 @@ mod tests {
     #[test]
     fn test_eval_for_all_values_string_not_like() {
         let mut cond = StringNotLike::new("k1", "re*123");
-        cond.add("k1", "actions:create:*");
+        cond.push("k1", "actions:create:*");
         cond.with_modifier(EvalModifier::ForAllValues);
 
         let cases = r#"

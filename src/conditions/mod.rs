@@ -64,12 +64,13 @@
 //!
 //! ```
 
+#[macro_use]
+pub(crate) mod util;
+
 mod boolean;
 mod condition;
 mod numeric;
 mod string;
-#[macro_use]
-pub(crate) mod util;
 
 pub use boolean::Bool;
 pub use condition::{Condition, Eval};
