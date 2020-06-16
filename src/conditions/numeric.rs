@@ -261,26 +261,24 @@ macro_rules! eval_num_not_cond {
         for (key, cond_values) in $cond.body.0.iter() {
             let valid = $ctx
                 .get(key)
-                .and_then(|x| {
-                    match $cond.modifier {
-                        Some(EvalModifier::ForAllValues) => {
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(util::is_disjoint(cond_values, ctx_values.as_slice(), $cmp))
-                        }
-                        Some(EvalModifier::ForAnyValue) => {
-                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
-                            Some(util::intersects(cond_values, ctx_values.as_slice(), |x, y| !($cmp(x, y))))
-                        }
-                        _ => {
-                            match Num::try_from(x.clone()) {
-                                Ok(v) => Some(cond_values.iter().any(|n| {
-                                    let result = $scmp(n, &v);
-                                    !result
-                                })),
-                                Err(_) => Some(false),
-                            }
-                        }
+                .and_then(|x| match $cond.modifier {
+                    Some(EvalModifier::ForAllValues) => {
+                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                        Some(util::is_disjoint(cond_values, ctx_values.as_slice(), $cmp))
                     }
+                    Some(EvalModifier::ForAnyValue) => {
+                        let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                        Some(util::intersects(cond_values, ctx_values.as_slice(), |x, y| {
+                            !($cmp(x, y))
+                        }))
+                    }
+                    _ => match Num::try_from(x.clone()) {
+                        Ok(v) => Some(cond_values.iter().any(|n| {
+                            let result = $scmp(n, &v);
+                            !result
+                        })),
+                        Err(_) => Some(false),
+                    },
                 })
                 .unwrap_or(default);
 
@@ -292,14 +290,6 @@ macro_rules! eval_num_not_cond {
         true
     }};
 }
-
-
-
-
-
-
-
-
 
 /// Exact matching
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

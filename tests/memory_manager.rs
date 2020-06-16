@@ -56,10 +56,7 @@ fn get_policies_by_principal() {
         mgr.attach(&principal, &id).unwrap();
     }
 
-    let actual = mgr
-        .get_policies_for_principal("users:test-user-2")
-        .unwrap()
-        .unwrap();
+    let actual = mgr.get_policies_for_principal("users:test-user-2").unwrap().unwrap();
 
     assert_eq!(actual.len(), 2);
 }

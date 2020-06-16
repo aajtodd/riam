@@ -51,10 +51,6 @@ fn engine_is_allowed() {
             "unexpected error evaluating policy for test[{}] '{}'",
             i, test.name
         ));
-        assert_eq!(
-            test.allowed, actual,
-            "policy test[{}] '{}' failed",
-            i, test.name
-        );
+        assert_eq!(test.allowed, actual, "policy test[{}] '{}' failed", i, test.name);
     }
 }

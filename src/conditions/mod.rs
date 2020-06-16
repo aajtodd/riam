@@ -69,11 +69,13 @@ pub(crate) mod util;
 
 mod boolean;
 mod condition;
+mod date;
 mod numeric;
 mod string;
 
 pub use boolean::Bool;
 pub use condition::{Condition, Eval};
+pub use date::{DateAfter, DateAtOrAfter, DateAtOrBefore, DateBefore, DateEquals, DateNotEquals};
 pub use numeric::{
     NumericEquals, NumericGreaterThan, NumericGreaterThanEquals, NumericLessThan, NumericLessThanEquals,
     NumericNotEquals,

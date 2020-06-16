@@ -79,10 +79,7 @@ pub struct AuthRequest {
     pub resource: String,
 
     /// The request context
-    #[serde(
-        skip_serializing_if = "Context::is_empty",
-        default = "Context::default"
-    )]
+    #[serde(skip_serializing_if = "Context::is_empty", default = "Context::default")]
     pub context: Context,
 }
 

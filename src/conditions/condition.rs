@@ -1,6 +1,6 @@
 use crate::Context;
 use enum_dispatch::enum_dispatch;
-use serde::de::{self, Deserializer, Visitor};
+use serde::de::{self, Deserializer, Error, Visitor};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use super::numeric::{
     NumericEquals, NumericGreaterThan, NumericGreaterThanEquals, NumericLessThan, NumericLessThanEquals,
     NumericNotEquals,
 };
+use super::{DateAfter, DateAtOrAfter, DateAtOrBefore, DateBefore, DateEquals, DateNotEquals};
 use super::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
@@ -147,6 +148,12 @@ pub enum Condition {
     NumericLessThanEquals,
     NumericGreaterThan,
     NumericGreaterThanEquals,
+    DateEquals,
+    DateNotEquals,
+    DateBefore,
+    DateAtOrBefore,
+    DateAfter,
+    DateAtOrAfter,
 }
 
 // The only way to get modifiers on the serialized format of a policy condition to match the syntax
@@ -175,6 +182,12 @@ impl Serialize for Condition {
             Condition::NumericLessThanEquals(ref c) => ser_cond!(serializer, c, 10),
             Condition::NumericGreaterThan(ref c) => ser_cond!(serializer, c, 11),
             Condition::NumericGreaterThanEquals(ref c) => ser_cond!(serializer, c, 12),
+            Condition::DateEquals(ref c) => ser_cond!(serializer, c, 13),
+            Condition::DateNotEquals(ref c) => ser_cond!(serializer, c, 14),
+            Condition::DateBefore(ref c) => ser_cond!(serializer, c, 15),
+            Condition::DateAtOrBefore(ref c) => ser_cond!(serializer, c, 16),
+            Condition::DateAfter(ref c) => ser_cond!(serializer, c, 17),
+            Condition::DateAtOrAfter(ref c) => ser_cond!(serializer, c, 18),
         }
     }
 }
@@ -284,6 +297,36 @@ impl<'de> Visitor<'de> for ConditionVisitor {
             "IfExists:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, IfExists),
             "ForAnyValue:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, ForAnyValue),
             "ForAllValues:NumericGreaterThanEquals" => de_cond_wmod!(NumericGreaterThanEquals, map, ForAllValues),
+
+            "DateEquals" => de_cond!(DateEquals, map),
+            "IfExists:DateEquals" => de_cond_wmod!(DateEquals, map, IfExists),
+            "ForAnyValue:DateEquals" => de_cond_wmod!(DateEquals, map, ForAnyValue),
+            "ForAllValues:DateEquals" => de_cond_wmod!(DateEquals, map, ForAllValues),
+
+            "DateNotEquals" => de_cond!(DateNotEquals, map),
+            "IfExists:DateNotEquals" => de_cond_wmod!(DateNotEquals, map, IfExists),
+            "ForAnyValue:DateNotEquals" => de_cond_wmod!(DateNotEquals, map, ForAnyValue),
+            "ForAllValues:DateNotEquals" => de_cond_wmod!(DateNotEquals, map, ForAllValues),
+
+            "DateBefore" => de_cond!(DateBefore, map),
+            "IfExists:DateBefore" => de_cond_wmod!(DateBefore, map, IfExists),
+            "ForAnyValue:DateBefore" => de_cond_wmod!(DateBefore, map, ForAnyValue),
+            "ForAllValues:DateBefore" => de_cond_wmod!(DateBefore, map, ForAllValues),
+
+            "DateAtOrBefore" => de_cond!(DateAtOrBefore, map),
+            "IfExists:DateAtOrBefore" => de_cond_wmod!(DateAtOrBefore, map, IfExists),
+            "ForAnyValue:DateAtOrBefore" => de_cond_wmod!(DateAtOrBefore, map, ForAnyValue),
+            "ForAllValues:DateAtOrBefore" => de_cond_wmod!(DateAtOrBefore, map, ForAllValues),
+
+            "DateAfter" => de_cond!(DateAfter, map),
+            "IfExists:DateAfter" => de_cond_wmod!(DateAfter, map, IfExists),
+            "ForAnyValue:DateAfter" => de_cond_wmod!(DateAfter, map, ForAnyValue),
+            "ForAllValues:DateAfter" => de_cond_wmod!(DateAfter, map, ForAllValues),
+
+            "DateAtOrAfter" => de_cond!(DateAtOrAfter, map),
+            "IfExists:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, IfExists),
+            "ForAnyValue:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, ForAnyValue),
+            "ForAllValues:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, ForAllValues),
 
             _ => {
                 let msg = format!("unrecognized condition '{}'", key);

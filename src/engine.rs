@@ -67,11 +67,7 @@ impl<T: PolicyManager> Engine<T> {
             // check the policy statements
             for stmt in p.statements.iter() {
                 // check if any of the actions match
-                if !stmt
-                    .actions
-                    .iter()
-                    .any(|action| wildcard::matches(action, &req.action))
-                {
+                if !stmt.actions.iter().any(|action| wildcard::matches(action, &req.action)) {
                     continue;
                 }
 
@@ -210,11 +206,7 @@ mod tests {
         let principal = "user:test-user";
         engine.manager.attach(principal, &id).unwrap();
 
-        let (principal, action, resource) = (
-            "user:test-user",
-            "account:describe:limits",
-            "resource:account:789",
-        );
+        let (principal, action, resource) = ("user:test-user", "account:describe:limits", "resource:account:789");
 
         // Statement 3
         let req = AuthRequest::new(principal, action, resource);

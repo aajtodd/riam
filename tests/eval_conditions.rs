@@ -25,10 +25,6 @@ fn eval_conditions() {
 
     for (i, test) in fixture.tests.iter().enumerate() {
         let actual = test.conditions.iter().all(|c| c.evaluate(&test.context));
-        assert_eq!(
-            test.expected, actual,
-            "condition test[{}] '{}' failed",
-            i, test.name
-        );
+        assert_eq!(test.expected, actual, "condition test[{}] '{}' failed", i, test.name);
     }
 }

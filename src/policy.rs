@@ -229,10 +229,7 @@ mod tests {
         assert_tokens(
             &policy,
             &[
-                Token::Struct {
-                    name: "Policy",
-                    len: 2,
-                },
+                Token::Struct { name: "Policy", len: 2 },
                 Token::Str("name"),
                 Token::Some,
                 Token::Str("my policy"),
@@ -298,9 +295,7 @@ mod tests {
         policy.statements.push(st2);
         assert_eq!(false, policy.is_valid());
 
-        policy.statements[1]
-            .resources
-            .push("resource:account".into());
+        policy.statements[1].resources.push("resource:account".into());
         assert_eq!(true, policy.is_valid());
     }
 
