@@ -247,6 +247,60 @@ macro_rules! eval_num_cond {
     }};
 }
 
+macro_rules! eval_num_not_cond {
+    ($cond:ident, $ctx:ident, $cmp:expr) => {{
+        eval_num_not_cond!($cond, $ctx, $cmp, $cmp)
+    }};
+
+    ($cond:ident, $ctx:ident, $cmp:expr, $scmp:expr) => {{
+        let default = match $cond.modifier {
+            Some(EvalModifier::IfExists) => true,
+            _ => false,
+        };
+
+        for (key, cond_values) in $cond.body.0.iter() {
+            let valid = $ctx
+                .get(key)
+                .and_then(|x| {
+                    match $cond.modifier {
+                        Some(EvalModifier::ForAllValues) => {
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(util::is_disjoint(cond_values, ctx_values.as_slice(), $cmp))
+                        }
+                        Some(EvalModifier::ForAnyValue) => {
+                            let ctx_values = serde_json_value_to_vec(x.clone()).ok().unwrap_or_else(Vec::new);
+                            Some(util::intersects(cond_values, ctx_values.as_slice(), |x, y| !($cmp(x, y))))
+                        }
+                        _ => {
+                            match Num::try_from(x.clone()) {
+                                Ok(v) => Some(cond_values.iter().any(|n| {
+                                    let result = $scmp(n, &v);
+                                    !result
+                                })),
+                                Err(_) => Some(false),
+                            }
+                        }
+                    }
+                })
+                .unwrap_or(default);
+
+            // all keys are and'd together to pass the condition, short-circuit early if one doesn't pass
+            if !valid {
+                return false;
+            }
+        }
+        true
+    }};
+}
+
+
+
+
+
+
+
+
+
 /// Exact matching
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct NumericEquals {
@@ -279,8 +333,7 @@ impl_cond_base!(NumericNotEquals, Num);
 
 impl Eval for NumericNotEquals {
     fn evaluate(&self, ctx: &Context) -> bool {
-        // FIXME - implement and figure out if we can actually re-use the normal NumericEquals and invert it
-        unimplemented!()
+        eval_num_not_cond!(self, ctx, |condv, ctxv| condv == ctxv)
     }
 }
 
@@ -399,7 +452,7 @@ mod tests {
 
         let d: Decimal = (-7i64).into();
         let (x, y) = (Num::Decimal(d), Num::NegInt(-7));
-        assert!(x == y);
+        assert_eq!(x, y);
     }
 
     #[test]
@@ -782,13 +835,13 @@ mod tests {
                 "cases": [
                     {
                         "ctx": {
-                            "k1": [2, "2.02"]
+                            "k1": [3, "3.02"]
                         },
                         "exp": true
                     },
                     {
                         "ctx": {
-                            "k1": ["2.02"]
+                            "k1": ["3.02"]
                         },
                         "exp": true
                     },
@@ -796,7 +849,7 @@ mod tests {
                         "ctx": {
                             "k1": -7
                         },
-                        "exp": true
+                        "exp": false
                     }
                 ]
             },
@@ -865,7 +918,7 @@ mod tests {
                     },
                     {
                         "ctx": {
-                            "k1": [2, 15[
+                            "k1": [2, 15]
                         },
                         "exp": true
                     }

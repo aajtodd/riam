@@ -178,6 +178,7 @@ pub mod test {
     ///             }
     ///         ]
     ///     }
+    /// ]"#;
     /// ```
     /// Where each entry is a condition and a set of contexts to evaluate against that condition.
     ///
