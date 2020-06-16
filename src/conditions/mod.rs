@@ -72,6 +72,7 @@ mod condition;
 mod date;
 mod numeric;
 mod string;
+mod ip_addr;
 
 pub use boolean::Bool;
 pub use condition::{Condition, Eval};
@@ -83,3 +84,4 @@ pub use numeric::{
 pub use string::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
+pub use ip_addr::{IpAddress, NotIpAddress};

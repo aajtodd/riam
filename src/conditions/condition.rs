@@ -16,6 +16,7 @@ use super::{DateAfter, DateAtOrAfter, DateAtOrBefore, DateBefore, DateEquals, Da
 use super::{
     StringEquals, StringEqualsIgnoreCase, StringLike, StringNotEquals, StringNotEqualsIgnoreCase, StringNotLike,
 };
+use super::{IpAddress, NotIpAddress};
 
 /// Modifiers that change the way a condition evaluates the request context
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -154,6 +155,8 @@ pub enum Condition {
     DateAtOrBefore,
     DateAfter,
     DateAtOrAfter,
+    IpAddress,
+    NotIpAddress,
 }
 
 // The only way to get modifiers on the serialized format of a policy condition to match the syntax
@@ -188,6 +191,8 @@ impl Serialize for Condition {
             Condition::DateAtOrBefore(ref c) => ser_cond!(serializer, c, 16),
             Condition::DateAfter(ref c) => ser_cond!(serializer, c, 17),
             Condition::DateAtOrAfter(ref c) => ser_cond!(serializer, c, 18),
+            Condition::IpAddress(ref c) => ser_cond!(serializer, c, 19),
+            Condition::NotIpAddress(ref c) => ser_cond!(serializer, c, 20),
         }
     }
 }
@@ -327,6 +332,16 @@ impl<'de> Visitor<'de> for ConditionVisitor {
             "IfExists:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, IfExists),
             "ForAnyValue:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, ForAnyValue),
             "ForAllValues:DateAtOrAfter" => de_cond_wmod!(DateAtOrAfter, map, ForAllValues),
+
+            "IpAddress" => de_cond!(IpAddress, map),
+            "IfExists:IpAddress" => de_cond_wmod!(IpAddress, map, IfExists),
+            "ForAnyValue:IpAddress" => de_cond_wmod!(IpAddress, map, ForAnyValue),
+            "ForAllValues:IpAddress" => de_cond_wmod!(IpAddress, map, ForAllValues),
+
+            "NotIpAddress" => de_cond!(NotIpAddress, map),
+            "IfExists:NotIpAddress" => de_cond_wmod!(NotIpAddress, map, IfExists),
+            "ForAnyValue:NotIpAddress" => de_cond_wmod!(NotIpAddress, map, ForAnyValue),
+            "ForAllValues:NotIpAddress" => de_cond_wmod!(NotIpAddress, map, ForAllValues),
 
             _ => {
                 let msg = format!("unrecognized condition '{}'", key);
