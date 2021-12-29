@@ -2,7 +2,7 @@ use crate::conditions::condition::{EvalModifier, Body};
 use crate::Context;
 use crate::conditions::Eval;
 use ipnet::IpNet;
-use serde::de::Unexpected;
+
 use serde::{Deserialize, Serialize};
 
 /// Match the specified IP address or range
@@ -19,7 +19,7 @@ pub struct IpAddress {
 impl_cond_base!(IpAddress, IpNet);
 
 impl Eval for IpAddress {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -37,7 +37,7 @@ pub struct NotIpAddress {
 impl_cond_base!(NotIpAddress, IpNet);
 
 impl Eval for NotIpAddress {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }

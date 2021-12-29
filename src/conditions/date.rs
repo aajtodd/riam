@@ -1,10 +1,10 @@
-use super::{util, Eval};
+use super::{Eval};
 use crate::conditions::condition::{Body, EvalModifier};
 use crate::Context;
 use chrono::{DateTime, Utc};
-use serde::de::Unexpected;
+
 use serde::{Deserialize, Serialize};
-use std::cmp;
+
 
 type UtcDateTime = DateTime<Utc>;
 
@@ -21,7 +21,7 @@ pub struct DateEquals {
 impl_cond_base!(DateEquals, UtcDateTime);
 
 impl Eval for DateEquals {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -39,7 +39,7 @@ pub struct DateNotEquals {
 impl_cond_base!(DateNotEquals, UtcDateTime);
 
 impl Eval for DateNotEquals {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -57,7 +57,7 @@ pub struct DateBefore {
 impl_cond_base!(DateBefore, UtcDateTime);
 
 impl Eval for DateBefore {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -75,7 +75,7 @@ pub struct DateAtOrBefore {
 impl_cond_base!(DateAtOrBefore, UtcDateTime);
 
 impl Eval for DateAtOrBefore {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -93,7 +93,7 @@ pub struct DateAfter {
 impl_cond_base!(DateAfter, UtcDateTime);
 
 impl Eval for DateAfter {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }
@@ -111,7 +111,7 @@ pub struct DateAtOrAfter {
 impl_cond_base!(DateAtOrAfter, UtcDateTime);
 
 impl Eval for DateAtOrAfter {
-    fn evaluate(&self, ctx: &Context) -> bool {
+    fn evaluate(&self, _ctx: &Context) -> bool {
         unimplemented!()
     }
 }

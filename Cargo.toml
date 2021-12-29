@@ -2,7 +2,7 @@
 name = "riam"
 version = "0.1.0"
 authors = ["Aaron J Todd <aajtodd@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 description = "A IAM inspired policy engine for making authorization decisions"
 repository = "https://github.com/aajtodd/riam"

@@ -1,6 +1,6 @@
 use crate::Context;
 use enum_dispatch::enum_dispatch;
-use serde::de::{self, Deserializer, Error, Visitor};
+use serde::de::{self, Deserializer, Visitor};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

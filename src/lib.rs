@@ -1,6 +1,6 @@
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 #![deny(missing_docs)]
-#![deny(intra_doc_link_resolution_failure)]
+#![deny(rustdoc::broken_intra_doc_links)]
 //! # riam
 //! riam is a decision/policy engine inspired by AWS IAM policies.
 //!
