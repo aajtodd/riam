@@ -40,7 +40,7 @@ impl Context {
     /// // }
     /// ```
     ///
-    pub fn insert<'a, K, V>(&'a mut self, k: K, v: V) -> &'a mut Self
+    pub fn insert<K, V>(&mut self, k: K, v: V) -> &mut Self
     where
         K: Into<String>,
         V: Into<Value>,
@@ -111,7 +111,7 @@ impl AuthRequest {
     ///    .with_context("k2", "v2");
     /// assert_eq!(req.context.get("k1"), Some(&Value::String("v1".into())));
     /// ```
-    pub fn with_context<'a, K, T>(&'a mut self, key: K, value: T) -> &'a mut Self
+    pub fn with_context<K, T>(&mut self, key: K, value: T) -> &mut Self
     where
         K: Into<String>,
         T: Into<Value>,
